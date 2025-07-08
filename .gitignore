@@ -1,4 +1,0 @@
-# 忽略所有 __pycache__ 目录
-**/__pycache__/
-# 忽略 tmp 目录及其内容
-tmp/
