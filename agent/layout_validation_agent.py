@@ -105,7 +105,7 @@ class LayoutValidationAgent:
             print(f"🔄 正在重新排序: {os.path.basename(html_path)}")
             
             # 调用API重新排序
-            response = inference_with_api(image_path, reorder_prompt)
+            response = inference_with_api(image_path, reorder_prompt, model_id="Qwen/Qwen2.5-VL-32B-Instruct")
             
             if not response:
                 print(f"❌ 重排序失败: {os.path.basename(html_path)}")

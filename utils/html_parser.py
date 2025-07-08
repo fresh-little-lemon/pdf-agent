@@ -1,5 +1,6 @@
 import os
 import base64
+import time
 from typing import List
 from openai import OpenAI
 from bs4 import BeautifulSoup
@@ -14,7 +15,8 @@ def encode_image(image_path: str) -> str:
 
 def inference_with_api(image_path: str, prompt: str, sys_prompt: str = "You are a helpful assistant.", 
                       model_id: str = "Qwen/Qwen2.5-VL-72B-Instruct", 
-                      min_pixels: int = 512*28*28, max_pixels: int = 2048*28*28) -> str:
+                      min_pixels: int = 512*28*28, max_pixels: int = 2048*28*28,
+                      max_retries: int = 3, retry_delay: float = 1.0) -> str:
     """
     使用API调用Qwen2.5-VL模型进行图片解析
     
@@ -25,6 +27,8 @@ def inference_with_api(image_path: str, prompt: str, sys_prompt: str = "You are 
         model_id: 模型ID
         min_pixels: 最小像素数
         max_pixels: 最大像素数
+        max_retries: 最大重试次数
+        retry_delay: 重试间隔（秒）
     
     Returns:
         模型输出的HTML内容
@@ -60,12 +64,36 @@ def inference_with_api(image_path: str, prompt: str, sys_prompt: str = "You are 
         }
     ]
     
-    completion = client.chat.completions.create(
-        model=model_id,
-        messages=messages,
-    )
+    # 添加重试机制
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            completion = client.chat.completions.create(
+                model=model_id,
+                messages=messages,
+            )
+            
+            result = completion.choices[0].message.content
+            if result and result.strip():  # 检查结果是否有效
+                if attempt > 0:
+                    print(f"✅ API调用成功（第{attempt + 1}次尝试）")
+                return result
+            else:
+                raise Exception("API返回空结果")
+                
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries:
+                print(f"⚠️ API调用失败（第{attempt + 1}次尝试）: {str(e)}")
+                print(f"🔄 等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+                # 每次重试增加延迟时间，避免频繁请求
+                retry_delay *= 1.5
+            else:
+                print(f"❌ API调用失败，已达到最大重试次数 ({max_retries + 1})")
     
-    return completion.choices[0].message.content
+    # 如果所有重试都失败，抛出最后一个异常
+    raise last_exception
 
 
 def clean_and_format_html(full_predict: str) -> str:
@@ -133,7 +161,7 @@ def clean_and_format_html(full_predict: str) -> str:
     return complete_html
 
 
-def parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", start_page: int = 1, enable_clean: bool = False) -> List[str]:
+def parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", start_page: int = 1, enable_clean: bool = False, max_retries: int = 3, retry_delay: float = 1.0) -> List[str]:
     """
     将图片列表解析为HTML格式并保存
     
@@ -143,6 +171,8 @@ def parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: 
         output_dir: 输出目录
         start_page: 起始页码，默认为1
         enable_clean: 是否启用HTML清理功能，默认为False
+        max_retries: 每个页面的最大重试次数，默认为3
+        retry_delay: 重试间隔（秒），默认为1.0
     
     Returns:
         生成的HTML文件路径列表
@@ -166,7 +196,9 @@ def parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: 
             raw_html = inference_with_api(
                 image_path=image_path,
                 prompt=prompt,
-                sys_prompt=system_prompt
+                sys_prompt=system_prompt,
+                max_retries=max_retries,
+                retry_delay=retry_delay
             )
             
             # 根据设置决定是否清理和格式化HTML
@@ -209,7 +241,7 @@ def get_api_status() -> dict:
     }
 
 
-def sequential_parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", enable_clean: bool = False) -> List[str]:
+def sequential_parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", enable_clean: bool = False, max_retries: int = 3, retry_delay: float = 1.0) -> List[str]:
     """
     顺序解析图片为HTML（推荐方式，页码对齐且不会覆盖）
     
@@ -218,15 +250,17 @@ def sequential_parse_images_to_html(image_paths: List[str], pdf_filename: str, o
         pdf_filename: PDF文件名
         output_dir: 输出目录
         enable_clean: 是否启用HTML清理功能
+        max_retries: 每个页面的最大重试次数，默认为3
+        retry_delay: 重试间隔（秒），默认为1.0
     
     Returns:
         生成的HTML文件路径列表
     """
-    return parse_images_to_html(image_paths, pdf_filename, output_dir, start_page=1, enable_clean=enable_clean)
+    return parse_images_to_html(image_paths, pdf_filename, output_dir, start_page=1, enable_clean=enable_clean, max_retries=max_retries, retry_delay=retry_delay)
 
 
 def parallel_parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", 
-                                  max_workers: int = 3, enable_clean: bool = False) -> List[str]:
+                                  max_workers: int = 3, enable_clean: bool = False, max_retries: int = 3, retry_delay: float = 1.0) -> List[str]:
     """
     并行解析图片为HTML（注意：需要确保API支持并发调用）
     
@@ -236,12 +270,13 @@ def parallel_parse_images_to_html(image_paths: List[str], pdf_filename: str, out
         output_dir: 输出目录
         max_workers: 最大并行工作数
         enable_clean: 是否启用HTML清理功能
+        max_retries: 每个页面的最大重试次数，默认为3
+        retry_delay: 重试间隔（秒），默认为1.0
     
     Returns:
         生成的HTML文件路径列表
     """
     import concurrent.futures
-    import time
     
     # 创建HTML输出目录
     html_output_dir = os.path.join(output_dir, f"{pdf_filename}_html")
@@ -260,7 +295,9 @@ def parallel_parse_images_to_html(image_paths: List[str], pdf_filename: str, out
             raw_html = inference_with_api(
                 image_path=image_path,
                 prompt=prompt,
-                sys_prompt=system_prompt
+                sys_prompt=system_prompt,
+                max_retries=max_retries,
+                retry_delay=retry_delay
             )
             
             # 根据设置决定是否清理和格式化HTML
@@ -311,7 +348,7 @@ def parallel_parse_images_to_html(image_paths: List[str], pdf_filename: str, out
 
 
 def parse_all_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", 
-                            parallel: bool = False, max_workers: int = 3, enable_clean: bool = False) -> List[str]:
+                            parallel: bool = False, max_workers: int = 3, enable_clean: bool = False, max_retries: int = 3, retry_delay: float = 1.0) -> List[str]:
     """
     解析所有图片为HTML格式（支持串行和并行处理）
     
@@ -322,16 +359,18 @@ def parse_all_images_to_html(image_paths: List[str], pdf_filename: str, output_d
         parallel: 是否使用并行处理
         max_workers: 并行处理的最大工作线程数
         enable_clean: 是否启用HTML清理功能
+        max_retries: 每个页面的最大重试次数，默认为3
+        retry_delay: 重试间隔（秒），默认为1.0
     
     Returns:
         生成的HTML文件路径列表
     """
     if parallel:
         print(f"使用并行处理模式，{max_workers}个线程...")
-        return parallel_parse_images_to_html(image_paths, pdf_filename, output_dir, max_workers, enable_clean)
+        return parallel_parse_images_to_html(image_paths, pdf_filename, output_dir, max_workers, enable_clean, max_retries, retry_delay)
     else:
         print("使用串行处理模式...")
-        return sequential_parse_images_to_html(image_paths, pdf_filename, output_dir, enable_clean)
+        return sequential_parse_images_to_html(image_paths, pdf_filename, output_dir, enable_clean, max_retries, retry_delay)
 
 
 def insert_extracted_images_to_html(html_files: List[str], extracted_images_dir: str, pdf_filename: str) -> List[str]:
@@ -429,7 +468,7 @@ def insert_extracted_images_to_html(html_files: List[str], extracted_images_dir:
 
 def parse_and_insert_images(pdf_file_bytes: bytes, pdf_filename: str, output_dir: str = "tmp", 
                            parallel: bool = False, max_workers: int = 3, enable_clean: bool = False,
-                           insert_extracted_images: bool = False) -> dict:
+                           insert_extracted_images: bool = False, max_retries: int = 3, retry_delay: float = 1.0) -> dict:
     """
     完整的PDF解析流程：转换为图片、解析为HTML、可选插入提取的图片
     
@@ -441,6 +480,8 @@ def parse_and_insert_images(pdf_file_bytes: bytes, pdf_filename: str, output_dir
         max_workers: 工作线程数
         enable_clean: 是否启用HTML清理
         insert_extracted_images: 是否插入提取的图片到HTML中
+        max_retries: 每个页面的最大重试次数，默认为3
+        retry_delay: 重试间隔（秒），默认为1.0
     
     Returns:
         包含所有结果路径的字典
@@ -476,7 +517,9 @@ def parse_and_insert_images(pdf_file_bytes: bytes, pdf_filename: str, output_dir
             output_dir=output_dir,
             parallel=parallel,
             max_workers=max_workers,
-            enable_clean=enable_clean
+            enable_clean=enable_clean,
+            max_retries=max_retries,
+            retry_delay=retry_delay
         )
         results['html_files'] = html_files
         print(f"✅ HTML解析完成，共生成 {len(html_files)} 个HTML文件")
@@ -515,7 +558,7 @@ def parse_and_insert_images(pdf_file_bytes: bytes, pdf_filename: str, output_dir
 
 
 def batch_parse_images_to_html(image_paths: List[str], pdf_filename: str, output_dir: str = "tmp", 
-                               batch_size: int = 5, use_parallel: bool = False, enable_clean: bool = False) -> List[str]:
+                               batch_size: int = 5, use_parallel: bool = False, enable_clean: bool = False, max_retries: int = 3, retry_delay: float = 1.0) -> List[str]:
     """
     批量解析图片为HTML（兼容性函数，现在使用顺序处理确保页码正确）
     
@@ -526,13 +569,15 @@ def batch_parse_images_to_html(image_paths: List[str], pdf_filename: str, output
         batch_size: 已废弃，保留兼容性
         use_parallel: 是否使用并行处理
         enable_clean: 是否启用HTML清理功能
+        max_retries: 每个页面的最大重试次数，默认为3
+        retry_delay: 重试间隔（秒），默认为1.0
     
     Returns:
         生成的HTML文件路径列表
     """
     if use_parallel:
         print("使用并行处理模式...")
-        return parallel_parse_images_to_html(image_paths, pdf_filename, output_dir, max_workers=3, enable_clean=enable_clean)
+        return parallel_parse_images_to_html(image_paths, pdf_filename, output_dir, max_workers=3, enable_clean=enable_clean, max_retries=max_retries, retry_delay=retry_delay)
     else:
         print("使用顺序处理模式...")
-        return sequential_parse_images_to_html(image_paths, pdf_filename, output_dir, enable_clean=enable_clean) 
+        return sequential_parse_images_to_html(image_paths, pdf_filename, output_dir, enable_clean=enable_clean, max_retries=max_retries, retry_delay=retry_delay) 

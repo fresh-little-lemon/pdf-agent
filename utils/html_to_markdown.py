@@ -154,7 +154,8 @@ def convert_list_to_markdown(list_element) -> List[str]:
 
 def clean_markdown_content(markdown_content: str) -> str:
     """
-    清理markdown内容，删除所有注释和元数据，只保留纯文档内容
+    彻底清理markdown内容，删除所有注释、元数据、分页信息，只保留纯文档内容
+    并处理分页造成的段落切开问题
     
     Args:
         markdown_content: 原始markdown内容
@@ -166,16 +167,18 @@ def clean_markdown_content(markdown_content: str) -> str:
     clean_lines = []
     
     for line in lines:
+        line_stripped = line.strip()
+        
         # 跳过HTML注释行
-        if line.strip().startswith('<!--') and line.strip().endswith('-->'):
+        if line_stripped.startswith('<!--') and line_stripped.endswith('-->'):
             continue
         
-        # 跳过页面分隔符
-        if line.strip() == '---' and len(clean_lines) > 0 and clean_lines[-1].strip().startswith('<!-- PAGE'):
+        # 跳过分隔符
+        if line_stripped == '---':
             continue
-            
+        
         # 跳过空行（但保留段落间的单个空行）
-        if line.strip() == '':
+        if line_stripped == '':
             # 如果上一行不是空行，则保留这个空行
             if clean_lines and clean_lines[-1].strip() != '':
                 clean_lines.append('')
@@ -189,7 +192,83 @@ def clean_markdown_content(markdown_content: str) -> str:
     while clean_lines and clean_lines[-1].strip() == '':
         clean_lines.pop()
     
-    return '\n'.join(clean_lines)
+    # 处理段落合并：如果一行开头是小写字母，且前面是文本行，则合并
+    merged_lines = []
+    i = 0
+    
+    while i < len(clean_lines):
+        current_line = clean_lines[i]
+        current_stripped = current_line.strip()
+        
+        # 如果当前行为空，直接添加
+        if not current_stripped:
+            merged_lines.append(current_line)
+            i += 1
+            continue
+            
+        # 如果当前行是markdown特殊语法（标题、表格、列表、公式等），不进行合并
+        if (current_stripped.startswith('#') or 
+            current_stripped.startswith('|') or 
+            current_stripped.startswith('-') or 
+            current_stripped.startswith('*') or 
+            current_stripped.startswith('!') or
+            current_stripped.startswith('$') or
+            current_stripped.startswith('```') or
+            current_stripped.startswith('>') or
+            current_stripped.startswith('[') or
+            current_stripped.isdigit() or
+            (len(current_stripped) > 1 and current_stripped[1:2] == '. ' and current_stripped[0].isdigit())):
+            merged_lines.append(current_line)
+            i += 1
+            continue
+        
+        # 检查是否需要与前一行合并
+        should_merge = False
+        if (merged_lines and 
+            merged_lines[-1].strip() and  # 前一行不是空行
+            not merged_lines[-1].strip().startswith('#') and  # 前一行不是标题
+            not merged_lines[-1].strip().startswith('|') and  # 前一行不是表格
+            not merged_lines[-1].strip().startswith('-') and  # 前一行不是列表
+            not merged_lines[-1].strip().startswith('*') and  # 前一行不是列表
+            not merged_lines[-1].strip().startswith('!') and  # 前一行不是图片
+            not merged_lines[-1].strip().startswith('$') and  # 前一行不是公式
+            not merged_lines[-1].strip().startswith('```') and  # 前一行不是代码块
+            not merged_lines[-1].strip().startswith('>') and  # 前一行不是引用
+            len(current_stripped) > 0 and
+            current_stripped[0].islower() and  # 当前行开头是小写字母
+            current_stripped[0].isalpha()):  # 确保是字母
+            
+            # 检查前一行是否以句号、问号、感叹号结尾，如果是则不合并
+            prev_line_stripped = merged_lines[-1].strip()
+            if not prev_line_stripped.endswith(('.', '?', '!')):
+                should_merge = True
+        
+        if should_merge:
+            # 合并到前一行，中间加一个空格
+            merged_lines[-1] = merged_lines[-1].rstrip() + ' ' + current_stripped
+        else:
+            merged_lines.append(current_line)
+        
+        i += 1
+    
+    # 最终清理：移除多余的空行
+    final_lines = []
+    prev_empty = True  # 初始状态视为前面有空行，避免开头多余空行
+    
+    for line in merged_lines:
+        if line.strip() == '':
+            if not prev_empty:  # 只有前一行不是空行时才添加空行
+                final_lines.append('')
+            prev_empty = True
+        else:
+            final_lines.append(line)
+            prev_empty = False
+    
+    # 移除结尾的空行
+    while final_lines and final_lines[-1].strip() == '':
+        final_lines.pop()
+    
+    return '\n'.join(final_lines)
 
 
 def parse_html_to_markdown(html_content: str, page_num: int) -> str:
@@ -466,15 +545,13 @@ def convert_html_files_to_markdown(html_dir: str, pdf_filename: str, output_dir:
         
         # 合并的markdown内容
         merged_content = []
-        merged_content.append(f"# {pdf_filename} - Complete Document")
+        merged_content.append(f"<!-- {pdf_filename} - Complete Document -->")
         merged_content.append("")
         merged_content.append(f"<!-- Generated from {len(html_files)} HTML pages -->")
         merged_content.append("")
         
-        # 干净版本的合并内容
+        # 干净版本的合并内容（不添加标题）
         clean_merged_content = []
-        clean_merged_content.append(f"# {pdf_filename}")
-        clean_merged_content.append("")
         
         # 处理每个HTML文件
         for html_file in html_files:
@@ -542,7 +619,9 @@ def convert_html_files_to_markdown(html_dir: str, pdf_filename: str, output_dir:
         # 保存合并的markdown文件（干净版本）
         clean_merged_file = os.path.join(markdown_dir, f"{pdf_filename}_clean.md")
         with open(clean_merged_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(clean_merged_content))
+            # 对合并的内容进行最终清理
+            final_clean_content = clean_markdown_content('\n'.join(clean_merged_content))
+            f.write(final_clean_content)
         
         results['clean_merged_file'] = clean_merged_file
         

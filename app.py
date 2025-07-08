@@ -7,7 +7,7 @@ from utils.pdf_converter import pdf_to_jpg, get_pdf_info, clean_tmp_folder
 from utils.image_extractor import extract_images_from_pdf, get_pdf_image_info, clean_extracted_images, convert_images_to_jpg
 from utils.html_parser import parse_images_to_html, get_api_status, batch_parse_images_to_html, parse_all_images_to_html, parse_and_insert_images
 from utils.html_to_markdown import convert_html_files_to_markdown, validate_html_directory, get_markdown_preview, clean_markdown_files
-from agent.layout_validation_agent import create_layout_validation_agent
+from utils.pdf_bbox_extractor import extract_pdf_bboxes
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
     st.subheader("🔧 选择功能")
     function_choice = st.radio(
         "请选择要使用的功能：",
-        ["📄➡️🖼️ PDF页面转JPG", "🖼️📤 提取PDF中的图片", "📄➡️📝 PDF解析为HTML", "📝➡️📋 HTML转Markdown", "🔄📝 布局验证智能体"],
+        ["📄➡️🖼️ PDF页面转JPG", "🖼️📤 提取PDF中的图片", "📄➡️📝 PDF解析为HTML", "📝➡️📋 HTML转Markdown", "📦🔍 PDF边框提取"],
         horizontal=True
     )
     
@@ -120,6 +120,25 @@ def main():
                 help="自动提取PDF中的图片并插入到HTML的img元素中，使用绝对路径"
             )
             
+            # 重试设置
+            st.subheader("🔄 重试设置")
+            max_retries = st.slider(
+                "最大重试次数",
+                min_value=1,
+                max_value=10,
+                value=3,
+                help="API调用失败时的最大重试次数，建议3-5次"
+            )
+            
+            retry_delay = st.slider(
+                "重试间隔（秒）",
+                min_value=0.5,
+                max_value=10.0,
+                value=1.0,
+                step=0.5,
+                help="重试之间的等待时间，每次重试会自动增加"
+            )
+            
             # API状态检查
             api_status = get_api_status()
             if api_status["api_key_configured"]:
@@ -147,6 +166,11 @@ def main():
             **图片插入说明：**
             - 🖼️ 启用插入：自动提取PDF中的图片并插入到HTML的img元素src属性中
             - 📂 使用绝对路径：插入的图片使用绝对路径，便于在任何位置打开HTML
+            
+            **重试设置说明：**
+            - 🔄 自动重试：API调用失败时自动重试，提升成功率
+            - ⏱️ 智能延迟：每次重试自动增加等待时间，避免频繁请求
+            - 📊 实时反馈：显示重试进度和失败原因
             """)
         elif function_choice == "📝➡️📋 HTML转Markdown":
             st.header("⚙️ Markdown转换设置")
@@ -211,72 +235,115 @@ def main():
             - 🔍 **完整版**：包含所有注释、bbox信息、页码标记等元数据
             - 🎯 **干净版**：删除所有注释和元数据，仅保留纯文档内容
             """)
-        else:  # 布局验证智能体
-            st.header("⚙️ 布局验证智能体设置")
+        elif function_choice == "📦🔍 PDF边框提取":
+            st.header("⚙️ PDF边框提取设置")
             
-            # PDF文件名输入
-            pdf_filename_layout = st.text_input(
-                "PDF文件名（不含扩展名）",
-                value="v9",
-                help="输入PDF文件名，将在tmp目录下查找对应的_html和_converted_to_img文件夹"
+            # 基本设置
+            st.subheader("📁 输入设置")
+            
+            bbox_pdf_file_source = st.radio(
+                "PDF文件来源",
+                ["上传文件", "指定路径"],
+                help="选择PDF文件的来源方式",
+                key="bbox_pdf_source"
             )
             
-            # 线程数设置
-            max_workers_layout = st.slider(
-                "最大工作线程数",
-                min_value=1,
-                max_value=20,
-                value=10,
-                help="同时处理的最大线程数，建议5-10个"
-            )
-            
-            # 检查所需文件夹是否存在
-            if pdf_filename_layout:
-                html_dir_layout = os.path.join("tmp", f"{pdf_filename_layout}_html")
-                image_dir_layout = os.path.join("tmp", f"{pdf_filename_layout}_converted_to_img")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if os.path.exists(html_dir_layout):
-                        html_files = [f for f in os.listdir(html_dir_layout) if f.endswith('.html')]
-                        st.success(f"✅ HTML目录存在 ({len(html_files)}个文件)")
-                    else:
-                        st.error("❌ HTML目录不存在")
-                
-                with col2:
-                    if os.path.exists(image_dir_layout):
-                        image_files = [f for f in os.listdir(image_dir_layout) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-                        st.success(f"✅ 图片目录存在 ({len(image_files)}个文件)")
-                    else:
-                        st.error("❌ 图片目录不存在")
-            
-            # API状态检查
-            api_status = get_api_status()
-            if api_status["api_key_configured"]:
-                st.success("✅ API密钥已配置")
+            if bbox_pdf_file_source == "指定路径":
+                bbox_pdf_path = st.text_input(
+                    "PDF文件路径",
+                    help="输入PDF文件的完整路径",
+                    placeholder="例如：tmp/diffcl-v34_bbox.pdf"
+                )
             else:
-                st.error("❌ 请设置 MODELSCOPE_SDK_TOKEN 环境变量")
-                
+                bbox_pdf_path = None
+            
+            # 输出设置
+            st.subheader("📤 输出设置")
+            
+            bbox_output_dir = st.text_input(
+                "输出目录",
+                value="tmp",
+                help="边框提取结果的保存目录"
+            )
+            
+            # 提取选项
+            st.subheader("🔍 提取选项")
+            
+            extract_text = st.checkbox(
+                "提取文本块边框",
+                value=True,
+                help="使用PyMuPDF提取文本块边框（绿色）"
+            )
+            
+            extract_images = st.checkbox(
+                "提取图像边框",
+                value=True,
+                help="使用PyMuPDF提取图像边框（红色）"
+            )
+            
+            extract_tables = st.checkbox(
+                "提取表格边框",
+                value=True,
+                help="使用Qwen2.5-VL AI检测表格边框（蓝色）"
+            )
+            
+
+            
+            # 显示设置
+            st.subheader("🎨 显示设置")
+            
+            bbox_line_width = st.slider(
+                "边框线条宽度",
+                min_value=0.5,
+                max_value=3.0,
+                value=1.0,
+                step=0.1,
+                help="设置绘制边框的线条宽度"
+            )
+            
+            show_labels = st.checkbox(
+                "显示元素标签",
+                value=True,
+                help="在边框附近显示元素类型标签"
+            )
+            
+            # 颜色说明
+            st.subheader("🌈 颜色说明")
+            
+            st.info(
+                "🎨 **边框颜色含义**\n"
+                "- 🟢 **绿色**: 文本块（PyMuPDF）\n"
+                "- 🔴 **红色**: 图像（PyMuPDF）\n"
+                "- 🔵 **蓝色**: 表格（Qwen2.5-VL AI检测）"
+            )
+            
             st.markdown("---")
-            st.markdown("### 📖 布局验证智能体说明")
+            st.markdown("### 📖 边框提取说明")
             st.markdown("""
-            1. 选择PDF文件名（需要已解析的HTML文件）
-            2. 随机选择一张图片检测是否为双栏布局
-            3. 如果是双栏布局，使用多线程重新排序HTML元素
-            4. 为每个HTML元素添加order字段标注阅读顺序
-            5. 备份原始文件并应用新的排序
+            1. 选择PDF文件（上传或指定路径）
+            2. 配置提取选项和显示设置
+            3. 点击提取按钮
+            4. 查看带边框的PDF结果
+            5. 下载处理后的文件
             
-            **处理流程：**
-            - 🔍 双栏布局检测：使用Qwen2.5-VL分析论文布局
-            - 🔄 多线程重排序：同时处理多个页面提升效率
-            - 📝 元素排序：按照从上到下、从左到右的阅读顺序
-            - 💾 文件管理：自动备份原始文件到origin文件夹
+                         **提取功能特点：**
+             - 📄 使用PyMuPDF提取文本块和图像边框
+             - 🤖 使用Qwen2.5-VL AI智能检测表格边框
+             - 🎨 不同类型元素使用不同颜色标识
+             - 🏷️ 可选显示元素类型标签和统计信息
+             - 📐 可调节边框线条宽度
+             - 💾 自动保存为{原文件名}_bbox.pdf格式
             
-            **注意事项：**
-            - 🎯 专门针对双栏布局的学术论文优化
-            - 📁 需要先使用PDF解析功能生成HTML文件
-            - 🔧 处理完成后会自动替换原始HTML文件
-            - 📦 原始文件会备份到origin文件夹中
+            **输出文件：**
+            - 在指定目录生成{原文件名}_bbox.pdf文件
+            - 包含所有选定类型的元素边框
+            - 保留原PDF的所有内容和格式
+            
+                         **应用场景：**
+             - 📋 文档布局分析和验证
+             - 🔍 OCR和解析结果验证
+             - 🖼️ 图像提取位置确认
+             - 📊 AI表格检测效果评估
             """)
     
     # 根据选择的功能显示不同界面
@@ -285,11 +352,15 @@ def main():
     elif function_choice == "🖼️📤 提取PDF中的图片":
         show_image_extraction_interface(convert_to_jpg, auto_clean_extract)
     elif function_choice == "📄➡️📝 PDF解析为HTML":
-        show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean, insert_images)
+        show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean, insert_images, max_retries, retry_delay)
     elif function_choice == "📝➡️📋 HTML转Markdown":
         show_html_to_markdown_interface(html_dir_input, pdf_filename_input, auto_clean_markdown)
-    else:  # 布局验证智能体
-        show_layout_validation_interface(pdf_filename_layout, max_workers_layout)
+    elif function_choice == "📦🔍 PDF边框提取":
+        show_pdf_bbox_extraction_interface(
+            bbox_pdf_file_source, bbox_pdf_path, bbox_output_dir,
+            extract_text, extract_images, extract_tables,
+            bbox_line_width, show_labels
+        )
 
 
 def show_pdf_to_jpg_interface(dpi, auto_clean):
@@ -507,7 +578,7 @@ def display_image_results(image_paths, filename, title, item_type):
                             )
 
 
-def show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean, insert_images):
+def show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean, insert_images, max_retries, retry_delay):
     """显示PDF HTML解析界面"""
     # 主要内容区域
     col1, col2 = st.columns([1, 1])
@@ -579,7 +650,9 @@ def show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean,
                                     parallel=(processing_mode == "⚡ 并行处理"),
                                     max_workers=max_workers,
                                     enable_clean=enable_clean,
-                                    insert_extracted_images=True
+                                    insert_extracted_images=True,
+                                    max_retries=max_retries,
+                                    retry_delay=retry_delay
                                 )
                                 
                                 if results['status'] == 'success':
@@ -601,7 +674,9 @@ def show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean,
                                         output_dir="tmp",
                                         parallel=True,
                                         max_workers=max_workers,
-                                        enable_clean=enable_clean
+                                        enable_clean=enable_clean,
+                                        max_retries=max_retries,
+                                        retry_delay=retry_delay
                                     )
                                 else:
                                     st.info(f"步骤2/2: 使用Qwen2.5-VL串行解析图片为HTML{clean_status}...")
@@ -610,7 +685,9 @@ def show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean,
                                         pdf_filename=pdf_filename,
                                         output_dir="tmp",
                                         parallel=False,
-                                        enable_clean=enable_clean
+                                        enable_clean=enable_clean,
+                                        max_retries=max_retries,
+                                        retry_delay=retry_delay
                                     )
                             
                             if html_files:
@@ -919,182 +996,239 @@ def display_markdown_results(results, pdf_filename):
                                 )
 
 
-def show_layout_validation_interface(pdf_filename, max_workers):
-    """显示布局验证智能体界面"""
-    st.header("🔄 布局验证智能体")
+
+def show_pdf_bbox_extraction_interface(pdf_file_source, pdf_path, output_dir, 
+                                      extract_text, extract_images, extract_tables,
+                                      line_width, show_labels):
+    """显示PDF边框提取界面"""
     
-    # 检查输入参数
-    if not pdf_filename:
-        st.warning("⚠️ 请在侧边栏输入PDF文件名")
-        return
-    
-    # 检查必要的目录和文件
-    html_dir = os.path.join("tmp", f"{pdf_filename}_html")
-    image_dir = os.path.join("tmp", f"{pdf_filename}_converted_to_img")
-    
-    if not os.path.exists(html_dir):
-        st.error(f"❌ HTML目录不存在: {html_dir}")
-        st.info("💡 请先使用'PDF解析为HTML'功能生成HTML文件")
-        return
-    
-    if not os.path.exists(image_dir):
-        st.error(f"❌ 图片目录不存在: {image_dir}")
-        st.info("💡 请先使用'PDF页面转JPG'功能生成图片文件")
-        return
-    
-    # 显示文件信息
-    st.subheader("📁 文件信息")
-    col1, col2 = st.columns(2)
+    # 主要内容区域
+    col1, col2 = st.columns([1, 1])
     
     with col1:
-        html_files = [f for f in os.listdir(html_dir) if f.endswith('.html') and f.startswith('page_')]
-        st.info(f"📄 HTML文件数量: {len(html_files)}")
+        st.header("📁 文件选择")
         
-        if html_files:
-            with st.expander("查看HTML文件列表"):
-                for html_file in sorted(html_files):
-                    st.text(f"• {html_file}")
+        uploaded_file = None
+        input_pdf_path = None
+        
+        if pdf_file_source == "上传文件":
+            # 文件上传
+            uploaded_file = st.file_uploader(
+                "选择PDF文件",
+                type=['pdf'],
+                accept_multiple_files=False,
+                key="bbox_pdf_uploader"
+            )
+            
+            if uploaded_file is not None:
+                # 显示文件信息
+                st.success(f"✅ 已上传文件: {uploaded_file.name}")
+                st.info(f"📊 文件大小: {uploaded_file.size / 1024 / 1024:.2f} MB")
+                
+                # 将上传的文件临时保存
+                temp_pdf_path = os.path.join("tmp", uploaded_file.name)
+                with open(temp_pdf_path, "wb") as f:
+                    f.write(uploaded_file.getvalue())
+                input_pdf_path = temp_pdf_path
+                
+        else:  # 指定路径
+            if pdf_path:
+                if os.path.exists(pdf_path):
+                    st.success(f"✅ 找到PDF文件: {pdf_path}")
+                    
+                    # 显示文件信息
+                    file_size = os.path.getsize(pdf_path) / 1024 / 1024
+                    st.info(f"📊 文件大小: {file_size:.2f} MB")
+                    
+                    input_pdf_path = pdf_path
+                else:
+                    st.error(f"❌ 找不到文件: {pdf_path}")
+            else:
+                st.info("👆 请输入PDF文件路径")
+        
+        # 显示提取选项摘要
+        if input_pdf_path:
+            st.subheader("🔍 提取选项摘要")
+            options = []
+            if extract_text:
+                options.append("🟢 文本块")
+            if extract_images:
+                options.append("🔴 图像")
+            if extract_tables:
+                options.append("🔵 表格")
+            
+            if options:
+                st.info(f"将提取: {', '.join(options)}")
+                st.info(f"线条宽度: {line_width}")
+                st.info(f"显示标签: {'是' if show_labels else '否'}")
+            else:
+                st.warning("⚠️ 请至少选择一种提取类型")
     
     with col2:
-        image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-        st.info(f"🖼️ 图片文件数量: {len(image_files)}")
+        st.header("🔄 提取操作")
         
-        if image_files:
-            with st.expander("查看图片文件列表"):
-                for image_file in sorted(image_files):
-                    st.text(f"• {image_file}")
-    
-    # 检查API状态
-    api_status = get_api_status()
-    if not api_status["api_key_configured"]:
-        st.error("❌ API密钥未配置，请设置 MODELSCOPE_SDK_TOKEN 环境变量")
-        return
-    
-    # 验证按钮
-    st.subheader("🚀 开始验证")
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🔍 开始布局验证与重排序", type="primary", use_container_width=True, key="validate_layout_button"):
-            if not html_files or not image_files:
-                st.error("❌ 缺少必要的HTML或图片文件")
-                return
+        if input_pdf_path:
+            # 检查是否至少选择了一种提取类型
+            any_extraction_enabled = extract_text or extract_images or extract_tables
             
-            # 创建进度条
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            try:
-                # 创建布局验证智能体
-                status_text.text("正在初始化布局验证智能体...")
-                progress_bar.progress(10)
-                
-                agent = create_layout_validation_agent(max_workers=max_workers)
-                
-                # 开始验证和重排序
-                status_text.text("正在进行布局验证和重排序...")
-                progress_bar.progress(30)
-                
-                result = agent.validate_and_reorder_layout(pdf_filename, "tmp")
-                
-                progress_bar.progress(100)
-                status_text.text("处理完成！")
-                
-                # 显示处理结果
-                st.success("✅ 布局验证完成！")
-                
-                # 存储结果到session state
-                st.session_state.layout_validation_result = result
-                st.session_state.layout_validation_pdf = pdf_filename
-                
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ 布局验证过程中出现错误: {str(e)}")
-                progress_bar.empty()
-                status_text.empty()
+            if not any_extraction_enabled:
+                st.warning("⚠️ 请在侧边栏至少选择一种边框提取类型")
+            else:
+                # 提取按钮
+                if st.button("🚀 开始提取边框", type="primary", use_container_width=True, key="extract_bbox_button"):
+                    
+                    with st.spinner("正在提取PDF边框，请稍候..."):
+                        try:
+                            # 调用边框提取函数
+                            result = extract_pdf_bboxes(
+                                input_pdf_path, 
+                                output_dir,
+                                enable_table_detection=extract_tables,
+                                max_retries=3,
+                                retry_delay=1.0
+                            )
+                            
+                            if result['status'] == 'success':
+                                st.success(f"✅ {result['message']}")
+                                
+                                # 显示统计信息
+                                stats = result['statistics']
+                                if stats:
+                                    st.subheader("📊 提取统计")
+                                    col_stat1, col_stat2 = st.columns(2)
+                                    
+                                    with col_stat1:
+                                        st.metric("总页数", stats.get('pages', 0))
+                                        st.metric("文本块", stats.get('text_blocks', 0))
+                                    
+                                    with col_stat2:
+                                        st.metric("图像", stats.get('images', 0))
+                                        st.metric("表格", stats.get('tables', 0))
+                                    
+                                    total_elements = sum([
+                                        stats.get('text_blocks', 0),
+                                        stats.get('images', 0),
+                                        stats.get('tables', 0)
+                                    ])
+                                    
+                                    st.metric("总元素数", total_elements)
+                                
+                                # 存储提取结果到session state
+                                st.session_state.bbox_extraction_result = result
+                                
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {result['message']}")
+                                
+                        except Exception as e:
+                            st.error(f"❌ 提取过程中出现错误: {str(e)}")
+        else:
+            st.info("👆 请先选择PDF文件")
     
-    # 显示验证结果
-    if hasattr(st.session_state, 'layout_validation_result') and st.session_state.layout_validation_result:
-        display_layout_validation_results(st.session_state.layout_validation_result, st.session_state.layout_validation_pdf)
+    # 显示提取结果
+    if hasattr(st.session_state, 'bbox_extraction_result') and st.session_state.bbox_extraction_result:
+        display_bbox_extraction_results(st.session_state.bbox_extraction_result)
 
 
-def display_layout_validation_results(result, pdf_filename):
-    """显示布局验证结果"""
+def display_bbox_extraction_results(result):
+    """显示PDF边框提取结果"""
     st.markdown("---")
-    st.header("📊 布局验证结果")
+    st.header("📦 边框提取结果")
     
-    # 显示基本信息
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        status_color = "🟢" if result['status'] == 'success' else "🔴"
-        st.metric("处理状态", f"{status_color} {result['status']}")
-    
-    with col2:
-        layout_type = "双栏" if result['is_double_column'] else "单栏"
-        st.metric("布局类型", f"📄 {layout_type}")
-    
-    with col3:
-        if result['status'] == 'success' and result.get('processed_files'):
-            st.metric("处理成功", len(result['processed_files']))
-        else:
-            st.metric("处理成功", 0)
-    
-    with col4:
-        if result['status'] == 'success' and result.get('failed_files'):
-            st.metric("处理失败", len(result['failed_files']))
-        else:
-            st.metric("处理失败", 0)
-    
-    # 显示处理消息
-    if result['status'] == 'success':
-        st.success(f"✅ {result['message']}")
-    else:
-        st.error(f"❌ {result['message']}")
-    
-    # 显示详细结果
-    if result['status'] == 'success' and result['is_double_column']:
-        st.subheader("📄 处理详情")
-        
-        # 成功处理的文件
-        if result.get('processed_files'):
-            with st.expander(f"✅ 成功处理的文件 ({len(result['processed_files'])}个)"):
-                for file in result['processed_files']:
-                    st.text(f"• {file}")
-        
-        # 失败处理的文件
-        if result.get('failed_files'):
-            with st.expander(f"❌ 处理失败的文件 ({len(result['failed_files'])}个)"):
-                for file in result['failed_files']:
-                    st.text(f"• {file}")
-        
-        # 文件管理信息
-        st.subheader("📁 文件管理")
-        html_dir = os.path.join("tmp", f"{pdf_filename}_html")
-        origin_dir = os.path.join(html_dir, "origin")
-        
-        col1, col2 = st.columns(2)
+    # 显示统计信息
+    stats = result['statistics']
+    if stats:
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.info("📂 原始文件备份")
-            st.text(f"备份目录: {origin_dir}")
-            if os.path.exists(origin_dir):
-                backup_files = [f for f in os.listdir(origin_dir) if f.endswith('.html')]
-                st.text(f"备份文件数: {len(backup_files)}个")
+            st.metric("总页数", stats.get('pages', 0))
+        with col2:
+            st.metric("文本块", stats.get('text_blocks', 0))
+        with col3:
+            st.metric("图像", stats.get('images', 0))
+        with col4:
+            st.metric("表格", stats.get('tables', 0))
+        
+        # 计算总元素数
+        total_elements = sum([
+            stats.get('text_blocks', 0),
+            stats.get('images', 0),
+            stats.get('tables', 0)
+        ])
+        
+        st.info(f"🎯 总共提取了 {total_elements} 个元素的边框")
+    
+    # 文件下载
+    output_path = result.get('output_path', '')
+    if output_path and os.path.exists(output_path):
+        st.subheader("📄 下载结果文件")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            # 显示输出文件信息
+            file_size = os.path.getsize(output_path) / 1024 / 1024
+            st.info(f"📄 输出文件: {os.path.basename(output_path)}")
+            st.info(f"📊 文件大小: {file_size:.2f} MB")
+            
+            # 下载按钮
+            with open(output_path, "rb") as pdf_file:
+                st.download_button(
+                    label="📥 下载带边框的PDF文件",
+                    data=pdf_file.read(),
+                    file_name=os.path.basename(output_path),
+                    mime="application/pdf",
+                    key="download_bbox_pdf",
+                    use_container_width=True,
+                    type="primary"
+                )
+        
+        # 显示颜色说明
+        st.subheader("🎨 边框颜色说明")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if stats.get('text_blocks', 0) > 0:
+                st.success(f"🟢 文本块: {stats.get('text_blocks', 0)} 个")
+            else:
+                st.info("🟢 文本块: 未提取")
         
         with col2:
-            st.info("🔄 更新后的文件")
-            st.text(f"HTML目录: {html_dir}")
-            if os.path.exists(html_dir):
-                updated_files = [f for f in os.listdir(html_dir) if f.endswith('.html') and f.startswith('page_')]
-                st.text(f"更新文件数: {len(updated_files)}个")
+            if stats.get('images', 0) > 0:
+                st.error(f"🔴 图像: {stats.get('images', 0)} 个")
+            else:
+                st.info("🔴 图像: 未提取")
         
-        # 提示信息
-        st.info("💡 处理完成后，原始HTML文件已备份到origin文件夹，新的带有order字段的HTML文件已替换原始文件")
+        with col3:
+            if stats.get('tables', 0) > 0:
+                st.info(f"🔵 表格: {stats.get('tables', 0)} 个")
+            else:
+                st.info("🔵 表格: 未提取")
+        
+        # 处理详情
+        st.subheader("📋 处理详情")
+        
+        processing_info = f"""
+        **输入文件:** `{result.get('input_path', 'N/A')}`
+        
+        **输出文件:** `{result.get('output_path', 'N/A')}`
+        
+        **处理状态:** ✅ {result.get('message', '处理完成')}
+        
+        **边框颜色含义:**
+        - 🟢 **绿色**: 文本块边框 (PyMuPDF)
+        - 🔴 **红色**: 图像边框 (PyMuPDF)
+        - 🔵 **蓝色**: 表格边框 (Qwen2.5-VL AI检测)
+        
+        **注意事项:**
+        - 边框是绘制在原PDF内容之上的
+        - 不同颜色代表不同类型的元素
+        - 标签显示元素类型和相关信息
+        """
+        
+        st.markdown(processing_info)
     
-    elif result['status'] == 'success' and not result['is_double_column']:
-        st.info("ℹ️ 检测到单栏布局，无需重新排序HTML元素")
+    else:
+        st.error("❌ 输出文件不存在或无法访问")
 
 
 def create_zip_file(image_paths):
@@ -1115,7 +1249,6 @@ def create_zip_file(image_paths):
 
 if __name__ == "__main__":
     # 确保tmp文件夹存在
-    if not os.path.exists("tmp"):
-        os.makedirs("tmp")
+    os.makedirs("tmp", exist_ok=True)
     
     main()
