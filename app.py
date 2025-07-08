@@ -211,6 +211,73 @@ def main():
             - 🔍 **完整版**：包含所有注释、bbox信息、页码标记等元数据
             - 🎯 **干净版**：删除所有注释和元数据，仅保留纯文档内容
             """)
+        else:  # 布局验证智能体
+            st.header("⚙️ 布局验证智能体设置")
+            
+            # PDF文件名输入
+            pdf_filename_layout = st.text_input(
+                "PDF文件名（不含扩展名）",
+                value="v9",
+                help="输入PDF文件名，将在tmp目录下查找对应的_html和_converted_to_img文件夹"
+            )
+            
+            # 线程数设置
+            max_workers_layout = st.slider(
+                "最大工作线程数",
+                min_value=1,
+                max_value=20,
+                value=10,
+                help="同时处理的最大线程数，建议5-10个"
+            )
+            
+            # 检查所需文件夹是否存在
+            if pdf_filename_layout:
+                html_dir_layout = os.path.join("tmp", f"{pdf_filename_layout}_html")
+                image_dir_layout = os.path.join("tmp", f"{pdf_filename_layout}_converted_to_img")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if os.path.exists(html_dir_layout):
+                        html_files = [f for f in os.listdir(html_dir_layout) if f.endswith('.html')]
+                        st.success(f"✅ HTML目录存在 ({len(html_files)}个文件)")
+                    else:
+                        st.error("❌ HTML目录不存在")
+                
+                with col2:
+                    if os.path.exists(image_dir_layout):
+                        image_files = [f for f in os.listdir(image_dir_layout) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                        st.success(f"✅ 图片目录存在 ({len(image_files)}个文件)")
+                    else:
+                        st.error("❌ 图片目录不存在")
+            
+            # API状态检查
+            api_status = get_api_status()
+            if api_status["api_key_configured"]:
+                st.success("✅ API密钥已配置")
+            else:
+                st.error("❌ 请设置 MODELSCOPE_SDK_TOKEN 环境变量")
+                
+            st.markdown("---")
+            st.markdown("### 📖 布局验证智能体说明")
+            st.markdown("""
+            1. 选择PDF文件名（需要已解析的HTML文件）
+            2. 随机选择一张图片检测是否为双栏布局
+            3. 如果是双栏布局，使用多线程重新排序HTML元素
+            4. 为每个HTML元素添加order字段标注阅读顺序
+            5. 备份原始文件并应用新的排序
+            
+            **处理流程：**
+            - 🔍 双栏布局检测：使用Qwen2.5-VL分析论文布局
+            - 🔄 多线程重排序：同时处理多个页面提升效率
+            - 📝 元素排序：按照从上到下、从左到右的阅读顺序
+            - 💾 文件管理：自动备份原始文件到origin文件夹
+            
+            **注意事项：**
+            - 🎯 专门针对双栏布局的学术论文优化
+            - 📁 需要先使用PDF解析功能生成HTML文件
+            - 🔧 处理完成后会自动替换原始HTML文件
+            - 📦 原始文件会备份到origin文件夹中
+            """)
     
     # 根据选择的功能显示不同界面
     if function_choice == "📄➡️🖼️ PDF页面转JPG":
@@ -219,8 +286,10 @@ def main():
         show_image_extraction_interface(convert_to_jpg, auto_clean_extract)
     elif function_choice == "📄➡️📝 PDF解析为HTML":
         show_html_parsing_interface(dpi, processing_mode, max_workers, enable_clean, insert_images)
-    else:
+    elif function_choice == "📝➡️📋 HTML转Markdown":
         show_html_to_markdown_interface(html_dir_input, pdf_filename_input, auto_clean_markdown)
+    else:  # 布局验证智能体
+        show_layout_validation_interface(pdf_filename_layout, max_workers_layout)
 
 
 def show_pdf_to_jpg_interface(dpi, auto_clean):
