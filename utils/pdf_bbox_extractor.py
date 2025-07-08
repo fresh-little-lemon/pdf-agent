@@ -109,6 +109,45 @@ class PDFBboxExtractor:
         
         return filtered_text_blocks
     
+    def _remove_overlapping_tables(self, tables: List[Dict[str, Any]], 
+                                  images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        移除与图像重叠的表格预测框，以图像为准
+        
+        Args:
+            tables: 表格预测框列表
+            images: 图像边界框列表
+            
+        Returns:
+            过滤后的表格列表
+        """
+        if not images or not tables:
+            return tables
+        
+        filtered_tables = []
+        removed_count = 0
+        
+        for table in tables:
+            table_bbox = table['bbox']
+            is_overlapping = False
+            
+            # 检查是否与任何图像重叠
+            for image in images:
+                image_bbox = image['bbox']
+                if self._boxes_overlap(table_bbox, image_bbox, overlap_threshold=0.3):
+                    is_overlapping = True
+                    removed_count += 1
+                    self._thread_safe_print(f"    🖼️ 表格 {table.get('index', 0)+1} 与图像 {image.get('index', 0)} 重叠，移除表格预测框")
+                    break
+            
+            if not is_overlapping:
+                filtered_tables.append(table)
+        
+        if removed_count > 0:
+            self._thread_safe_print(f"  移除了 {removed_count} 个与图像重叠的表格预测框")
+        
+        return filtered_tables
+    
     def _remove_duplicate_images(self, images: List[Dict[str, Any]], overlap_threshold: float = 0.8) -> List[Dict[str, Any]]:
         """
         去除重叠的图像边框
@@ -288,10 +327,11 @@ class PDFBboxExtractor:
                     self._thread_safe_print(f"    📐 找到完整匹配的矩形边框")
                     return [rect_x1, rect_y1, rect_x2, rect_y2]
         
-        # 从候选线条中选择最近的边框
+        # 从候选线条中选择最近的边框，并验证修正幅度
         refined_coords = [pred_left, pred_top, pred_right, pred_bottom]
         found_borders = {'left': False, 'top': False, 'right': False, 'bottom': False}
         refinement_details = []
+        max_correction_threshold = 30.0  # 最大修正幅度阈值（像素）
         
         # 小高度表格的特殊处理逻辑
         if is_small_height_table:
@@ -299,51 +339,67 @@ class PDFBboxExtractor:
             if candidates['top']:
                 candidates['top'].sort(key=lambda x: x[1])
                 best_top = candidates['top'][0]
-                refined_coords[1] = best_top[0]  # y坐标
-                found_borders['top'] = True
-                refinement_details.append(f"上边框(优先): {pred_top:.1f} → {best_top[0]:.1f} (距离: {best_top[1]:.1f})")
+                
+                # 验证上边框修正幅度
+                top_correction = abs(best_top[0] - pred_top)
+                if top_correction <= max_correction_threshold:
+                    refined_coords[1] = best_top[0]  # y坐标
+                    found_borders['top'] = True
+                    refinement_details.append(f"上边框(优先): {pred_top:.1f} → {best_top[0]:.1f} (距离: {best_top[1]:.1f})")
+                else:
+                    self._thread_safe_print(f"      ⚠️ 上边框修正幅度过大({top_correction:.1f}px > {max_correction_threshold}px)，跳过修正")
                 
                 # 2. 基于上边框位置和原始高度计算下边框目标位置
-                target_bottom = refined_coords[1] + pred_height
-                self._thread_safe_print(f"      基于上边框和原始高度计算下边框目标位置: {target_bottom:.1f}")
-                
-                # 3. 重新搜索下边框，使用更小的容忍度在目标位置附近查找
-                adjusted_bottom_candidates = []
-                small_tolerance = min(tolerance * 0.85, 25.0)  # 使用更小的容忍度
-                
-                for line in page_lines:
-                    if line['type'] == 'line':
-                        start_x, start_y = line['start']
-                        end_x, end_y = line['end']
+                if found_borders['top']:
+                    target_bottom = refined_coords[1] + pred_height
+                    self._thread_safe_print(f"      基于上边框和原始高度计算下边框目标位置: {target_bottom:.1f}")
+                    
+                    # 3. 重新搜索下边框，使用更小的容忍度在目标位置附近查找
+                    adjusted_bottom_candidates = []
+                    small_tolerance = min(tolerance * 0.85, 25.0)  # 使用更小的容忍度
+                    
+                    for line in page_lines:
+                        if line['type'] == 'line':
+                            start_x, start_y = line['start']
+                            end_x, end_y = line['end']
+                            
+                            # 水平线条（可能是下边框）
+                            if abs(start_y - end_y) <= 2:  # 水平线
+                                y_pos = (start_y + end_y) / 2
+                                x_range = [min(start_x, end_x), max(start_x, end_x)]
+                                
+                                # 检查是否与预测框的水平范围有重叠，且在目标下边框位置附近
+                                overlap_left = max(x_range[0], pred_left - tolerance)
+                                overlap_right = min(x_range[1], pred_right + tolerance)
+                                overlap_width = overlap_right - overlap_left
+                                
+                                if overlap_width > 0:
+                                    # 计算与目标下边框的距离
+                                    bottom_distance = abs(y_pos - target_bottom)
+                                    if bottom_distance <= small_tolerance:
+                                        adjusted_bottom_candidates.append((y_pos, bottom_distance, x_range))
+                    
+                    # 从调整后的候选中选择最近的下边框
+                    if adjusted_bottom_candidates:
+                        adjusted_bottom_candidates.sort(key=lambda x: x[1])
+                        best_bottom = adjusted_bottom_candidates[0]
                         
-                        # 水平线条（可能是下边框）
-                        if abs(start_y - end_y) <= 2:  # 水平线
-                            y_pos = (start_y + end_y) / 2
-                            x_range = [min(start_x, end_x), max(start_x, end_x)]
-                            
-                            # 检查是否与预测框的水平范围有重叠，且在目标下边框位置附近
-                            overlap_left = max(x_range[0], pred_left - tolerance)
-                            overlap_right = min(x_range[1], pred_right + tolerance)
-                            overlap_width = overlap_right - overlap_left
-                            
-                            if overlap_width > 0:
-                                # 计算与目标下边框的距离
-                                bottom_distance = abs(y_pos - target_bottom)
-                                if bottom_distance <= small_tolerance:
-                                    adjusted_bottom_candidates.append((y_pos, bottom_distance, x_range))
-                
-                # 从调整后的候选中选择最近的下边框
-                if adjusted_bottom_candidates:
-                    adjusted_bottom_candidates.sort(key=lambda x: x[1])
-                    best_bottom = adjusted_bottom_candidates[0]
-                    refined_coords[3] = best_bottom[0]  # y坐标
-                    found_borders['bottom'] = True
-                    refinement_details.append(f"下边框(平移搜索): {pred_bottom:.1f} → {target_bottom:.1f} → {best_bottom[0]:.1f} (距离: {best_bottom[1]:.1f})")
-                else:
-                    # 如果找不到合适的下边框，使用原始计算位置
-                    refined_coords[3] = target_bottom
-                    found_borders['bottom'] = True  # 标记为已处理，虽然是计算得出的
-                    refinement_details.append(f"下边框(保持计算): {pred_bottom:.1f} → {target_bottom:.1f} (基于上边框+原始高度)")
+                        # 验证下边框修正幅度
+                        bottom_correction = abs(best_bottom[0] - target_bottom)
+                        if bottom_correction <= max_correction_threshold:
+                            refined_coords[3] = best_bottom[0]  # y坐标
+                            found_borders['bottom'] = True
+                            refinement_details.append(f"下边框(平移搜索): {pred_bottom:.1f} → {target_bottom:.1f} → {best_bottom[0]:.1f} (距离: {best_bottom[1]:.1f})")
+                        else:
+                            # 如果修正幅度过大，使用计算位置
+                            refined_coords[3] = target_bottom
+                            found_borders['bottom'] = True
+                            refinement_details.append(f"下边框(保持计算): {pred_bottom:.1f} → {target_bottom:.1f} (修正幅度过大: {bottom_correction:.1f}px)")
+                    else:
+                        # 如果找不到合适的下边框，使用原始计算位置
+                        refined_coords[3] = target_bottom
+                        found_borders['bottom'] = True  # 标记为已处理，虽然是计算得出的
+                        refinement_details.append(f"下边框(保持计算): {pred_bottom:.1f} → {target_bottom:.1f} (基于上边框+原始高度)")
             
             else:
                 # 如果没有找到上边框，回退到标准处理
@@ -352,17 +408,29 @@ class PDFBboxExtractor:
                 if candidates['top']:
                     candidates['top'].sort(key=lambda x: x[1])
                     best_top = candidates['top'][0]
-                    refined_coords[1] = best_top[0]  # y坐标
-                    found_borders['top'] = True
-                    refinement_details.append(f"上边框: {pred_top:.1f} → {best_top[0]:.1f} (距离: {best_top[1]:.1f})")
+                    
+                    # 验证上边框修正幅度
+                    top_correction = abs(best_top[0] - pred_top)
+                    if top_correction <= max_correction_threshold:
+                        refined_coords[1] = best_top[0]  # y坐标
+                        found_borders['top'] = True
+                        refinement_details.append(f"上边框: {pred_top:.1f} → {best_top[0]:.1f} (距离: {best_top[1]:.1f})")
+                    else:
+                        self._thread_safe_print(f"      ⚠️ 上边框修正幅度过大({top_correction:.1f}px > {max_correction_threshold}px)，保持原值")
                 
                 # 处理下边框
                 if candidates['bottom']:
                     candidates['bottom'].sort(key=lambda x: x[1])
                     best_bottom = candidates['bottom'][0]
-                    refined_coords[3] = best_bottom[0]  # y坐标
-                    found_borders['bottom'] = True
-                    refinement_details.append(f"下边框: {pred_bottom:.1f} → {best_bottom[0]:.1f} (距离: {best_bottom[1]:.1f})")
+                    
+                    # 验证下边框修正幅度
+                    bottom_correction = abs(best_bottom[0] - pred_bottom)
+                    if bottom_correction <= max_correction_threshold:
+                        refined_coords[3] = best_bottom[0]  # y坐标
+                        found_borders['bottom'] = True
+                        refinement_details.append(f"下边框: {pred_bottom:.1f} → {best_bottom[0]:.1f} (距离: {best_bottom[1]:.1f})")
+                    else:
+                        self._thread_safe_print(f"      ⚠️ 下边框修正幅度过大({bottom_correction:.1f}px > {max_correction_threshold}px)，保持原值")
         
         else:
             # 标准高度表格的正常处理
@@ -370,17 +438,29 @@ class PDFBboxExtractor:
             if candidates['top']:
                 candidates['top'].sort(key=lambda x: x[1])
                 best_top = candidates['top'][0]
-                refined_coords[1] = best_top[0]  # y坐标
-                found_borders['top'] = True
-                refinement_details.append(f"上边框: {pred_top:.1f} → {best_top[0]:.1f} (距离: {best_top[1]:.1f})")
+                
+                # 验证上边框修正幅度
+                top_correction = abs(best_top[0] - pred_top)
+                if top_correction <= max_correction_threshold:
+                    refined_coords[1] = best_top[0]  # y坐标
+                    found_borders['top'] = True
+                    refinement_details.append(f"上边框: {pred_top:.1f} → {best_top[0]:.1f} (距离: {best_top[1]:.1f})")
+                else:
+                    self._thread_safe_print(f"      ⚠️ 上边框修正幅度过大({top_correction:.1f}px > {max_correction_threshold}px)，保持原值")
             
             # 处理下边框
             if candidates['bottom']:
                 candidates['bottom'].sort(key=lambda x: x[1])
                 best_bottom = candidates['bottom'][0]
-                refined_coords[3] = best_bottom[0]  # y坐标
-                found_borders['bottom'] = True
-                refinement_details.append(f"下边框: {pred_bottom:.1f} → {best_bottom[0]:.1f} (距离: {best_bottom[1]:.1f})")
+                
+                # 验证下边框修正幅度
+                bottom_correction = abs(best_bottom[0] - pred_bottom)
+                if bottom_correction <= max_correction_threshold:
+                    refined_coords[3] = best_bottom[0]  # y坐标
+                    found_borders['bottom'] = True
+                    refinement_details.append(f"下边框: {pred_bottom:.1f} → {best_bottom[0]:.1f} (距离: {best_bottom[1]:.1f})")
+                else:
+                    self._thread_safe_print(f"      ⚠️ 下边框修正幅度过大({bottom_correction:.1f}px > {max_correction_threshold}px)，保持原值")
         
         # 左右边框处理（对所有表格都相同）
         # 处理左边框
@@ -388,17 +468,29 @@ class PDFBboxExtractor:
             # 按距离排序，选择最近的
             candidates['left'].sort(key=lambda x: x[1])
             best_left = candidates['left'][0]
-            refined_coords[0] = best_left[0]  # x坐标
-            found_borders['left'] = True
-            refinement_details.append(f"左边框: {pred_left:.1f} → {best_left[0]:.1f} (距离: {best_left[1]:.1f})")
+            
+            # 验证左边框修正幅度
+            left_correction = abs(best_left[0] - pred_left)
+            if left_correction <= max_correction_threshold:
+                refined_coords[0] = best_left[0]  # x坐标
+                found_borders['left'] = True
+                refinement_details.append(f"左边框: {pred_left:.1f} → {best_left[0]:.1f} (距离: {best_left[1]:.1f})")
+            else:
+                self._thread_safe_print(f"      ⚠️ 左边框修正幅度过大({left_correction:.1f}px > {max_correction_threshold}px)，保持原值")
         
         # 处理右边框
         if candidates['right']:
             candidates['right'].sort(key=lambda x: x[1])
             best_right = candidates['right'][0]
-            refined_coords[2] = best_right[0]  # x坐标
-            found_borders['right'] = True
-            refinement_details.append(f"右边框: {pred_right:.1f} → {best_right[0]:.1f} (距离: {best_right[1]:.1f})")
+            
+            # 验证右边框修正幅度
+            right_correction = abs(best_right[0] - pred_right)
+            if right_correction <= max_correction_threshold:
+                refined_coords[2] = best_right[0]  # x坐标
+                found_borders['right'] = True
+                refinement_details.append(f"右边框: {pred_right:.1f} → {best_right[0]:.1f} (距离: {best_right[1]:.1f})")
+            else:
+                self._thread_safe_print(f"      ⚠️ 右边框修正幅度过大({right_correction:.1f}px > {max_correction_threshold}px)，保持原值")
         
         # 根据找到的边框线的两端坐标进行坐标修正
         coordinate_adjustments = []
@@ -420,16 +512,23 @@ class PDFBboxExtractor:
             min_x = min(all_x_starts)
             max_x = max(all_x_ends)
             
-            # 如果没有找到垂直边框，或者水平边框的范围更准确，则使用水平边框的x范围
+            # 验证左边界修正幅度
+            left_x_correction = abs(min_x - refined_coords[0])
             if not found_borders['left'] or abs(min_x - pred_left) < abs(refined_coords[0] - pred_left):
-                if abs(min_x - refined_coords[0]) > 2:  # 避免微小调整
+                if left_x_correction > 2 and left_x_correction <= max_correction_threshold:  # 避免微小调整且不超过阈值
                     coordinate_adjustments.append(f"左边界: {refined_coords[0]:.1f} → {min_x:.1f} (基于水平边框)")
                     refined_coords[0] = min_x
+                elif left_x_correction > max_correction_threshold:
+                    self._thread_safe_print(f"      ⚠️ 基于水平边框的左边界修正幅度过大({left_x_correction:.1f}px > {max_correction_threshold}px)，保持原值")
             
+            # 验证右边界修正幅度
+            right_x_correction = abs(max_x - refined_coords[2])
             if not found_borders['right'] or abs(max_x - pred_right) < abs(refined_coords[2] - pred_right):
-                if abs(max_x - refined_coords[2]) > 2:  # 避免微小调整
+                if right_x_correction > 2 and right_x_correction <= max_correction_threshold:  # 避免微小调整且不超过阈值
                     coordinate_adjustments.append(f"右边界: {refined_coords[2]:.1f} → {max_x:.1f} (基于水平边框)")
                     refined_coords[2] = max_x
+                elif right_x_correction > max_correction_threshold:
+                    self._thread_safe_print(f"      ⚠️ 基于水平边框的右边界修正幅度过大({right_x_correction:.1f}px > {max_correction_threshold}px)，保持原值")
         
         # 2. 如果找到垂直边框（左/右），使用其垂直范围修正上下边界
         vertical_y_ranges = []
@@ -448,16 +547,23 @@ class PDFBboxExtractor:
             min_y = min(all_y_starts)
             max_y = max(all_y_ends)
             
-            # 如果没有找到水平边框，或者垂直边框的范围更准确，则使用垂直边框的y范围
+            # 验证上边界修正幅度
+            top_y_correction = abs(min_y - refined_coords[1])
             if not found_borders['top'] or abs(min_y - pred_top) < abs(refined_coords[1] - pred_top):
-                if abs(min_y - refined_coords[1]) > 2:  # 避免微小调整
+                if top_y_correction > 2 and top_y_correction <= max_correction_threshold:  # 避免微小调整且不超过阈值
                     coordinate_adjustments.append(f"上边界: {refined_coords[1]:.1f} → {min_y:.1f} (基于垂直边框)")
                     refined_coords[1] = min_y
+                elif top_y_correction > max_correction_threshold:
+                    self._thread_safe_print(f"      ⚠️ 基于垂直边框的上边界修正幅度过大({top_y_correction:.1f}px > {max_correction_threshold}px)，保持原值")
             
+            # 验证下边界修正幅度
+            bottom_y_correction = abs(max_y - refined_coords[3])
             if not found_borders['bottom'] or abs(max_y - pred_bottom) < abs(refined_coords[3] - pred_bottom):
-                if abs(max_y - refined_coords[3]) > 2:  # 避免微小调整
+                if bottom_y_correction > 2 and bottom_y_correction <= max_correction_threshold:  # 避免微小调整且不超过阈值
                     coordinate_adjustments.append(f"下边界: {refined_coords[3]:.1f} → {max_y:.1f} (基于垂直边框)")
                     refined_coords[3] = max_y
+                elif bottom_y_correction > max_correction_threshold:
+                    self._thread_safe_print(f"      ⚠️ 基于垂直边框的下边界修正幅度过大({bottom_y_correction:.1f}px > {max_correction_threshold}px)，保持原值")
         
         # 3. 边框对齐：确保找到的边框线与修正后的坐标一致
         alignment_adjustments = []
@@ -944,6 +1050,16 @@ class PDFBboxExtractor:
             images = self.extract_images(page)
             page_stats['images'] = len(images)
             self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页找到 {len(images)} 个图像（已去重）")
+            
+            # 4. 移除与图像重叠的表格预测框，以图像为准
+            if tables and images:
+                original_table_count = len(tables)
+                tables = self._remove_overlapping_tables(tables, images)
+                removed_table_count = original_table_count - len(tables)
+                page_stats['tables'] = len(tables)  # 更新表格统计
+                
+                if removed_table_count > 0:
+                    self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页移除了 {removed_table_count} 个与图像重叠的表格预测框")
             
             # 合并所有元素
             all_elements.extend(tables)
