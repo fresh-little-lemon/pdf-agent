@@ -919,6 +919,184 @@ def display_markdown_results(results, pdf_filename):
                                 )
 
 
+def show_layout_validation_interface(pdf_filename, max_workers):
+    """显示布局验证智能体界面"""
+    st.header("🔄 布局验证智能体")
+    
+    # 检查输入参数
+    if not pdf_filename:
+        st.warning("⚠️ 请在侧边栏输入PDF文件名")
+        return
+    
+    # 检查必要的目录和文件
+    html_dir = os.path.join("tmp", f"{pdf_filename}_html")
+    image_dir = os.path.join("tmp", f"{pdf_filename}_converted_to_img")
+    
+    if not os.path.exists(html_dir):
+        st.error(f"❌ HTML目录不存在: {html_dir}")
+        st.info("💡 请先使用'PDF解析为HTML'功能生成HTML文件")
+        return
+    
+    if not os.path.exists(image_dir):
+        st.error(f"❌ 图片目录不存在: {image_dir}")
+        st.info("💡 请先使用'PDF页面转JPG'功能生成图片文件")
+        return
+    
+    # 显示文件信息
+    st.subheader("📁 文件信息")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        html_files = [f for f in os.listdir(html_dir) if f.endswith('.html') and f.startswith('page_')]
+        st.info(f"📄 HTML文件数量: {len(html_files)}")
+        
+        if html_files:
+            with st.expander("查看HTML文件列表"):
+                for html_file in sorted(html_files):
+                    st.text(f"• {html_file}")
+    
+    with col2:
+        image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        st.info(f"🖼️ 图片文件数量: {len(image_files)}")
+        
+        if image_files:
+            with st.expander("查看图片文件列表"):
+                for image_file in sorted(image_files):
+                    st.text(f"• {image_file}")
+    
+    # 检查API状态
+    api_status = get_api_status()
+    if not api_status["api_key_configured"]:
+        st.error("❌ API密钥未配置，请设置 MODELSCOPE_SDK_TOKEN 环境变量")
+        return
+    
+    # 验证按钮
+    st.subheader("🚀 开始验证")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🔍 开始布局验证与重排序", type="primary", use_container_width=True, key="validate_layout_button"):
+            if not html_files or not image_files:
+                st.error("❌ 缺少必要的HTML或图片文件")
+                return
+            
+            # 创建进度条
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                # 创建布局验证智能体
+                status_text.text("正在初始化布局验证智能体...")
+                progress_bar.progress(10)
+                
+                agent = create_layout_validation_agent(max_workers=max_workers)
+                
+                # 开始验证和重排序
+                status_text.text("正在进行布局验证和重排序...")
+                progress_bar.progress(30)
+                
+                result = agent.validate_and_reorder_layout(pdf_filename, "tmp")
+                
+                progress_bar.progress(100)
+                status_text.text("处理完成！")
+                
+                # 显示处理结果
+                st.success("✅ 布局验证完成！")
+                
+                # 存储结果到session state
+                st.session_state.layout_validation_result = result
+                st.session_state.layout_validation_pdf = pdf_filename
+                
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ 布局验证过程中出现错误: {str(e)}")
+                progress_bar.empty()
+                status_text.empty()
+    
+    # 显示验证结果
+    if hasattr(st.session_state, 'layout_validation_result') and st.session_state.layout_validation_result:
+        display_layout_validation_results(st.session_state.layout_validation_result, st.session_state.layout_validation_pdf)
+
+
+def display_layout_validation_results(result, pdf_filename):
+    """显示布局验证结果"""
+    st.markdown("---")
+    st.header("📊 布局验证结果")
+    
+    # 显示基本信息
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        status_color = "🟢" if result['status'] == 'success' else "🔴"
+        st.metric("处理状态", f"{status_color} {result['status']}")
+    
+    with col2:
+        layout_type = "双栏" if result['is_double_column'] else "单栏"
+        st.metric("布局类型", f"📄 {layout_type}")
+    
+    with col3:
+        if result['status'] == 'success' and result.get('processed_files'):
+            st.metric("处理成功", len(result['processed_files']))
+        else:
+            st.metric("处理成功", 0)
+    
+    with col4:
+        if result['status'] == 'success' and result.get('failed_files'):
+            st.metric("处理失败", len(result['failed_files']))
+        else:
+            st.metric("处理失败", 0)
+    
+    # 显示处理消息
+    if result['status'] == 'success':
+        st.success(f"✅ {result['message']}")
+    else:
+        st.error(f"❌ {result['message']}")
+    
+    # 显示详细结果
+    if result['status'] == 'success' and result['is_double_column']:
+        st.subheader("📄 处理详情")
+        
+        # 成功处理的文件
+        if result.get('processed_files'):
+            with st.expander(f"✅ 成功处理的文件 ({len(result['processed_files'])}个)"):
+                for file in result['processed_files']:
+                    st.text(f"• {file}")
+        
+        # 失败处理的文件
+        if result.get('failed_files'):
+            with st.expander(f"❌ 处理失败的文件 ({len(result['failed_files'])}个)"):
+                for file in result['failed_files']:
+                    st.text(f"• {file}")
+        
+        # 文件管理信息
+        st.subheader("📁 文件管理")
+        html_dir = os.path.join("tmp", f"{pdf_filename}_html")
+        origin_dir = os.path.join(html_dir, "origin")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info("📂 原始文件备份")
+            st.text(f"备份目录: {origin_dir}")
+            if os.path.exists(origin_dir):
+                backup_files = [f for f in os.listdir(origin_dir) if f.endswith('.html')]
+                st.text(f"备份文件数: {len(backup_files)}个")
+        
+        with col2:
+            st.info("🔄 更新后的文件")
+            st.text(f"HTML目录: {html_dir}")
+            if os.path.exists(html_dir):
+                updated_files = [f for f in os.listdir(html_dir) if f.endswith('.html') and f.startswith('page_')]
+                st.text(f"更新文件数: {len(updated_files)}个")
+        
+        # 提示信息
+        st.info("💡 处理完成后，原始HTML文件已备份到origin文件夹，新的带有order字段的HTML文件已替换原始文件")
+    
+    elif result['status'] == 'success' and not result['is_double_column']:
+        st.info("ℹ️ 检测到单栏布局，无需重新排序HTML元素")
+
+
 def create_zip_file(image_paths):
     """创建包含所有图片的ZIP文件"""
     try:
