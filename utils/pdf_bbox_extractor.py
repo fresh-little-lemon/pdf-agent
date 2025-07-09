@@ -257,7 +257,7 @@ class PDFBboxExtractor:
         pred_width = pred_right - pred_left
         
         # 检查是否为小高度表格（需要特殊处理）
-        is_small_height_table = pred_height < 50.0
+        is_small_height_table = pred_height < 75.0
         
         # 存储候选边框线及其距离
         candidates = {
@@ -336,8 +336,8 @@ class PDFBboxExtractor:
                         top_distance = abs(y_pos - pred_top)
                         if top_distance <= tolerance:
                             # 上边框候选：线条应该在预测上边界的上方或略微下方
-                            # 对于小高度表格（<50px），使用更大的宽容度
-                            if pred_height < 50.0:
+                            # 对于小高度表格（<75px），使用更大的宽容度
+                            if pred_height < 75.0:
                                 # 小高度表格：允许向下偏移更大的距离（表格高度的50%或最小30px）
                                 max_down_offset = max(pred_height * 0.85, 30.0)
                                 self._thread_safe_print(f"      🔍 小高度表格上边框搜索: 使用增强宽容度 {max_down_offset:.1f}px")
@@ -355,8 +355,8 @@ class PDFBboxExtractor:
                         bottom_distance = abs(y_pos - pred_bottom)
                         if bottom_distance <= tolerance:
                             # 下边框候选：线条应该在预测下边界的下方或略微上方
-                            # 对于小高度表格（<50px），使用更大的宽容度
-                            if pred_height < 50.0:
+                            # 对于小高度表格（<75px），使用更大的宽容度
+                            if pred_height < 75.0:
                                 # 小高度表格：允许向上偏移更大的距离（表格高度的50%或最小30px）
                                 max_up_offset = max(pred_height * 0.5, 30.0)
                                 self._thread_safe_print(f"      🔍 小高度表格下边框搜索: 使用增强宽容度 {max_up_offset:.1f}px")
@@ -741,12 +741,13 @@ class PDFBboxExtractor:
         
         return input_height, input_width
     
-    def extract_text_blocks(self, page: fitz.Page) -> List[Dict[str, Any]]:
+    def extract_text_blocks(self, page: fitz.Page, tables: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         提取页面中的文本块
         
         Args:
             page: PyMuPDF页面对象
+            tables: 表格信息列表（用于避免合并表格附近的文本块）
             
         Returns:
             文本块信息列表
@@ -763,7 +764,153 @@ class PDFBboxExtractor:
                     'rect': fitz.Rect(block["bbox"])
                 })
         
-        return text_blocks
+        # 合并重叠或间距小于5px的文本块（但不合并距离表格5px内的文本块）
+        merged_text_blocks = self._merge_text_blocks(text_blocks, tables or [])
+        
+        return merged_text_blocks
+    
+    def _calculate_min_distance(self, bbox1: List[float], bbox2: List[float]) -> float:
+        """
+        计算两个矩形框之间的最小距离
+        
+        Args:
+            bbox1: 第一个边界框 [x1, y1, x2, y2]
+            bbox2: 第二个边界框 [x1, y1, x2, y2]
+            
+        Returns:
+            最小距离（如果重叠则返回0）
+        """
+        x1_1, y1_1, x2_1, y2_1 = bbox1
+        x1_2, y1_2, x2_2, y2_2 = bbox2
+        
+        # 检查是否重叠
+        if not (x2_1 < x1_2 or x2_2 < x1_1 or y2_1 < y1_2 or y2_2 < y1_1):
+            return 0.0  # 重叠
+        
+        # 计算水平距离
+        if x2_1 < x1_2:
+            h_distance = x1_2 - x2_1
+        elif x2_2 < x1_1:
+            h_distance = x1_1 - x2_2
+        else:
+            h_distance = 0
+        
+        # 计算垂直距离
+        if y2_1 < y1_2:
+            v_distance = y1_2 - y2_1
+        elif y2_2 < y1_1:
+            v_distance = y1_1 - y2_2
+        else:
+            v_distance = 0
+        
+        # 如果一个方向重叠，返回另一个方向的距离
+        if h_distance == 0:
+            return v_distance
+        elif v_distance == 0:
+            return h_distance
+        else:
+            # 两个方向都不重叠，返回对角线距离
+            return math.sqrt(h_distance * h_distance + v_distance * v_distance)
+    
+    def _is_text_block_near_table(self, text_bbox: List[float], tables: List[Dict[str, Any]], threshold: float = 5.0) -> bool:
+        """
+        检查文本块是否距离任何表格过近
+        
+        Args:
+            text_bbox: 文本块边界框 [x1, y1, x2, y2]
+            tables: 表格信息列表
+            threshold: 距离阈值（像素）
+            
+        Returns:
+            是否距离表格过近
+        """
+        if not tables:
+            return False
+            
+        for table in tables:
+            table_bbox = table['bbox']
+            distance = self._calculate_min_distance(text_bbox, table_bbox)
+            if distance < threshold:
+                return True
+        return False
+    
+    def _merge_text_blocks(self, text_blocks: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        合并重叠或间距小于5px的文本块（但不合并距离表格5px内的文本块）
+        
+        Args:
+            text_blocks: 文本块列表
+            tables: 表格信息列表
+            
+        Returns:
+            合并后的文本块列表
+        """
+        if len(text_blocks) <= 1:
+            return text_blocks
+        
+        original_count = len(text_blocks)
+        merged = True
+        current_blocks = text_blocks.copy()
+        skipped_near_table = 0
+        
+        while merged:
+            merged = False
+            new_blocks = []
+            used_indices = set()
+            
+            for i, block1 in enumerate(current_blocks):
+                if i in used_indices:
+                    continue
+                    
+                bbox1 = block1['bbox']
+                merged_block = block1.copy()
+                
+                for j, block2 in enumerate(current_blocks[i+1:], i+1):
+                    if j in used_indices:
+                        continue
+                        
+                    bbox2 = block2['bbox']
+                    distance = self._calculate_min_distance(bbox1, bbox2)
+                    
+                    if distance < 5.0:  # 重叠或间距小于5px
+                        # 检查两个文本块是否距离表格过近
+                        if (self._is_text_block_near_table(bbox1, tables) or 
+                            self._is_text_block_near_table(bbox2, tables)):
+                            skipped_near_table += 1
+                            continue  # 跳过距离表格5px内的文本块合并
+                        
+                        # 合并两个文本块
+                        merged_bbox = [
+                            min(bbox1[0], bbox2[0]),  # min x1
+                            min(bbox1[1], bbox2[1]),  # min y1
+                            max(bbox1[2], bbox2[2]),  # max x2
+                            max(bbox1[3], bbox2[3])   # max y2
+                        ]
+                        
+                        merged_content = merged_block['content'] + " " + block2['content']
+                        
+                        merged_block = {
+                            'type': 'text',
+                            'bbox': merged_bbox,
+                            'content': merged_content.strip(),
+                            'rect': fitz.Rect(merged_bbox)
+                        }
+                        
+                        bbox1 = merged_bbox  # 更新bbox1为合并后的框
+                        used_indices.add(j)
+                        merged = True
+                
+                new_blocks.append(merged_block)
+                used_indices.add(i)
+            
+            current_blocks = new_blocks
+        
+        final_count = len(current_blocks)
+        if original_count != final_count:
+            skip_msg = f" (跳过{skipped_near_table}个距离表格5px内的合并)" if skipped_near_table > 0 else ""
+            self._thread_safe_print(f"  文本块合并: {original_count} → {final_count} (合并了 {original_count - final_count} 个间距<5px的文本块{skip_msg})")
+        
+        return current_blocks
     
     def extract_images(self, page: fitz.Page) -> List[Dict[str, Any]]:
         """
@@ -1168,8 +1315,8 @@ class PDFBboxExtractor:
                     refined_count = sum(1 for table in tables if table.get('refined', False))
                     page_stats['refined_tables'] = refined_count
             
-            # 4. 提取文本块并移除与表格重叠的
-            text_blocks = self.extract_text_blocks(page)
+            # 4. 提取文本块并移除与表格重叠的（传入表格信息以避免合并表格附近的文本块）
+            text_blocks = self.extract_text_blocks(page, tables)
             self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页找到 {len(text_blocks)} 个原始文本块")
             
             # 移除与表格重叠的文字块
@@ -1431,6 +1578,7 @@ class PDFBboxExtractor:
             print(f"💡 表格优先检测已启用，重叠的文本块已自动移除")
             print(f"🖼️ 图像去重已启用，避免重复检测")
             print(f"🎯 图像优先级已启用，与图像重叠的表格已自动移除")
+            print(f"📝 文本块智能合并已启用，自动合并间距<5px的文本块（但跳过距离表格5px内的文本块）")
             if total_elements['refined_tables'] > 0:
                 print(f"📐 框线修正已启用，{total_elements['refined_tables']}个表格边框已根据PDF线条修正（限制30px修正幅度）")
             if total_elements['original_lines'] > 0:
