@@ -2,15 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Agent包 - 包含各种智能体
-
-这个包包含了PDF处理工具中使用的各种智能体:
-- LayoutValidationAgent: 布局验证智能体，用于检测和修正HTML元素的排列顺序
+PDF论文分析Agent模块
+包含论文总结和问答功能的智能代理
 """
 
-from .layout_validation_agent import LayoutValidationAgent, create_layout_validation_agent
+from .paper_summary_agent import PaperSummaryAgent
+from .paper_qa_agent import PaperQAAgent
 
-__all__ = [
-    'LayoutValidationAgent',
-    'create_layout_validation_agent'
-]
+__all__ = ['PaperSummaryAgent', 'PaperQAAgent'] 

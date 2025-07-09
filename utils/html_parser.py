@@ -13,6 +13,75 @@ def encode_image(image_path: str) -> str:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
+def inference_with_api_text_only(prompt: str, sys_prompt: str = "You are a helpful assistant.", 
+                               model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct",
+                               max_retries: int = 3, retry_delay: float = 1.0) -> str:
+    """
+    使用API调用Qwen模型进行纯文本推理（不需要图像）
+    
+    Args:
+        prompt: 提示词
+        sys_prompt: 系统提示词
+        model_id: 模型ID
+        max_retries: 最大重试次数
+        retry_delay: 重试间隔（秒）
+    
+    Returns:
+        模型输出内容
+    """
+    # 从环境变量获取API密钥
+    api_key = os.getenv("MODELSCOPE_SDK_TOKEN") or os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        raise Exception("请设置 MODELSCOPE_SDK_TOKEN 或 DASHSCOPE_API_KEY 环境变量")
+    
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api-inference.modelscope.cn/v1/"
+    )
+
+    messages = [
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": sys_prompt}]
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": prompt}]
+        }
+    ]
+    
+    # 添加重试机制
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            completion = client.chat.completions.create(
+                model=model_id,
+                messages=messages,
+            )
+            
+            result = completion.choices[0].message.content
+            if result and result.strip():  # 检查结果是否有效
+                if attempt > 0:
+                    print(f"✅ API调用成功（第{attempt + 1}次尝试）")
+                return result
+            else:
+                raise Exception("API返回空结果")
+                
+        except Exception as e:
+            last_exception = e
+            if attempt < max_retries:
+                print(f"⚠️ API调用失败（第{attempt + 1}次尝试）: {str(e)}")
+                print(f"🔄 等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+                # 每次重试增加延迟时间，避免频繁请求
+                retry_delay *= 1.5
+            else:
+                print(f"❌ API调用失败，已达到最大重试次数 ({max_retries + 1})")
+    
+    # 如果所有重试都失败，抛出最后一个异常
+    raise last_exception
+
+
 def inference_with_api(image_path: str, prompt: str, sys_prompt: str = "You are a helpful assistant.", 
                       model_id: str = "Qwen/Qwen2.5-VL-72B-Instruct", 
                       min_pixels: int = 512*28*28, max_pixels: int = 2048*28*28,

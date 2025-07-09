@@ -1,0 +1,136 @@
+2025-07-09 17:55:47,828 - INFO - 创建临时工作目录: C:\Users\53046\AppData\Local\Temp\pdf_workflow_i6fbecn0
+2025-07-09 17:55:47,836 - INFO - 保存上传文件: C:\Users\53046\AppData\Local\Temp\pdf_workflow_i6fbecn0\v9.pdf
+2025-07-09 17:55:47,837 - INFO - ============================================================
+2025-07-09 17:55:47,837 - INFO - 步骤1: 开始PDF边界框提取
+2025-07-09 17:55:47,838 - INFO - ============================================================
+2025-07-09 17:56:01,907 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:01,941 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:02,139 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:04,332 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:07,709 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:07,833 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:09,242 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:09,607 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:11,359 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:12,860 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:13,625 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:14,092 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:16,244 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:19,238 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:20,033 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:21,415 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:23,607 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:24,368 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:24,901 - INFO - ✅ 边界框提取成功: 成功并行处理 14 页，共提取 115 个元素
+2025-07-09 17:56:24,901 - INFO - 📊 统计信息: {'text_blocks': 105, 'images': 4, 'tables': 6, 'refined_tables': 6, 'original_lines': 132, 'original_qwen_tables': 0, 'vector_graphics': 0, 'pages': 14}
+2025-07-09 17:56:24,901 - INFO - ============================================================
+2025-07-09 17:56:24,901 - INFO - 步骤2: 开始布局分析和切片
+2025-07-09 17:56:24,901 - INFO - ============================================================
+2025-07-09 17:56:26,205 - INFO - ✅ 布局分析和切片成功: 成功处理14页，生成24个切片，丢弃4个小尺寸切片
+2025-07-09 17:56:26,205 - INFO - 📊 切片统计: 总切片数=24, 丢弃=4, 不规则切片=5
+2025-07-09 17:56:26,207 - INFO - ============================================================
+2025-07-09 17:56:26,207 - INFO - 步骤3: 开始将切片图像解析为HTML
+2025-07-09 17:56:26,207 - INFO - ============================================================
+2025-07-09 17:56:26,208 - INFO - 找到 24 个切片图像
+2025-07-09 17:56:44,054 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:54,817 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:56:58,447 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:57:02,232 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:57:14,920 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:57:27,259 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:57:39,489 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:57:43,159 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:58:12,652 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:58:45,055 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 17:59:45,899 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:00:33,178 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:01:01,837 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:01:21,467 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:01:45,521 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:02:14,814 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:02:55,466 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:03:29,189 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:03:57,159 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:04:52,994 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:05:23,717 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:05:49,865 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:05:56,136 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:06:23,774 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:06:23,783 - INFO - ✅ HTML解析成功: 成功解析 24 个切片为HTML
+2025-07-09 18:06:23,785 - INFO - ============================================================
+2025-07-09 18:06:23,785 - INFO - 步骤4: 开始将HTML转换为Markdown
+2025-07-09 18:06:23,785 - INFO - ============================================================
+2025-07-09 18:06:23,786 - INFO - HTML目录验证成功: 找到 24 个HTML文件
+2025-07-09 18:06:23,885 - INFO - ✅ Markdown转换成功: 成功转换 24 个HTML文件为Markdown格式（包含完整版和干净版）
+2025-07-09 18:06:23,885 - INFO - 📊 文档统计: {'total_pages': 24, 'total_elements': 207, 'total_headings': 20, 'total_paragraphs': 112, 'total_formulas': 15, 'total_images': 19, 'total_tables': 9, 'total_lists': 4}
+2025-07-09 18:06:23,885 - INFO - ============================================================
+2025-07-09 18:06:23,885 - INFO - 步骤5: 开始使用AI模型总结论文
+2025-07-09 18:06:23,885 - INFO - ============================================================
+2025-07-09 18:06:23,885 - INFO - 读取Markdown文件成功，内容长度: 39652 字符
+2025-07-09 18:06:26,059 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2025-07-09 18:06:28,735 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2025-07-09 18:06:32,498 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2025-07-09 18:06:37,807 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2025-07-09 18:06:37,807 - ERROR - 论文总结过程中出错: Error code: 400 - {'error': {'code': 'invalid_parameter_error', 'message': 'parameter.enable_thinking must be set to false for non-streaming calls', 'param': None, 'type': 'invalid_request_error'}, 'request_id': '64cfdc24-c47c-4faa-b326-ad8145fdd13f'}
+2025-07-09 18:15:48,340 - INFO - 创建临时工作目录: C:\Users\53046\AppData\Local\Temp\pdf_workflow_8n8zmn2q
+2025-07-09 18:15:48,343 - INFO - 保存上传文件: C:\Users\53046\AppData\Local\Temp\pdf_workflow_8n8zmn2q\v9.pdf
+2025-07-09 18:15:48,345 - INFO - ============================================================
+2025-07-09 18:15:48,346 - INFO - 步骤1: 开始PDF边界框提取
+2025-07-09 18:15:48,346 - INFO - ============================================================
+2025-07-09 18:16:03,380 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:03,455 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:03,469 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:04,133 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:10,429 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:10,549 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:10,876 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:12,771 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:16,034 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:16,706 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:17,540 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:18,508 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:19,828 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:22,150 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:22,358 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:25,236 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:27,169 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:30,725 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:16:31,257 - INFO - ✅ 边界框提取成功: 成功并行处理 14 页，共提取 115 个元素
+2025-07-09 18:16:31,257 - INFO - 📊 统计信息: {'text_blocks': 105, 'images': 4, 'tables': 6, 'refined_tables': 6, 'original_lines': 132, 'original_qwen_tables': 0, 'vector_graphics': 0, 'pages': 14}
+2025-07-09 18:16:31,258 - INFO - ============================================================
+2025-07-09 18:16:31,258 - INFO - 步骤2: 开始布局分析和切片
+2025-07-09 18:16:31,258 - INFO - ============================================================
+2025-07-09 18:16:32,501 - INFO - ✅ 布局分析和切片成功: 成功处理14页，生成24个切片，丢弃4个小尺寸切片
+2025-07-09 18:16:32,502 - INFO - 📊 切片统计: 总切片数=24, 丢弃=4, 不规则切片=5
+2025-07-09 18:16:32,503 - INFO - ============================================================
+2025-07-09 18:16:32,503 - INFO - 步骤3: 开始将切片图像解析为HTML
+2025-07-09 18:16:32,503 - INFO - ============================================================
+2025-07-09 18:16:32,504 - INFO - 找到 24 个切片图像
+2025-07-09 18:16:52,995 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:17:03,751 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:17:08,743 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:17:12,079 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:17:25,471 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:18:15,024 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:18:52,794 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:18:56,861 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:19:19,758 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:19:53,435 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:20:40,893 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:21:28,232 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:21:49,415 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:22:19,289 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:22:26,807 - INFO - Retrying request to /chat/completions in 0.493033 seconds
+2025-07-09 18:22:55,498 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:24:39,910 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:25:21,751 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:25:59,716 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:26:02,906 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 429 Too Many Requests"
+2025-07-09 18:26:02,906 - INFO - Retrying request to /chat/completions in 0.428708 seconds
+2025-07-09 18:26:32,695 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:27:25,304 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:27:51,703 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:28:21,910 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:28:29,493 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:29:03,114 - INFO - HTTP Request: POST https://api-inference.modelscope.cn/v1/chat/completions "HTTP/1.1 200 OK"
+2025-07-09 18:29:03,117 - INFO - ✅ HTML解析成功: 成功解析 24 个切片为HTML

@@ -28,6 +28,7 @@ class PDFBboxExtractor:
             'table': (0, 0, 1),     # 蓝色 - 表格
             'original_line': (1, 0.5, 0),  # 橙色 - 原始框线
             'original_qwen_table': (0.5, 0, 1),  # 紫色 - 原始Qwen表格
+            'vector_graphic': (1, 0, 0.5),  # 洋红色 - 矢量图
         }
         self.line_width = 1.0
         self.max_workers = max_workers
@@ -1182,6 +1183,8 @@ class PDFBboxExtractor:
             line_width = self.line_width
             if element_type == 'table' and element.get('refined', False):
                 line_width = self.line_width * 2  # 修正过的表格使用2倍线宽
+            elif element_type == 'vector_graphic':
+                line_width = self.line_width * 3  # 矢量图使用3倍线宽以突出显示
             
             # 绘制矩形框
             page.draw_rect(rect, color=color, width=line_width)
@@ -1203,6 +1206,16 @@ class PDFBboxExtractor:
                 label_text = f"原始{line_type} #{element.get('index', 0)}"
             elif element_type == 'original_qwen_table':
                 label_text = f"原始Qwen表格 #{element.get('index', 0)}"
+            elif element_type == 'vector_graphic':
+                # 矢量图显示组件信息
+                component_types = element.get('component_types', {})
+                component_count = element.get('component_count', 0)
+                label_text = f"矢量图 #{element.get('index', 0)} ({component_count}元素)"
+                
+                # 添加组件类型详情（在第二行显示）
+                type_summary = ', '.join([f"{t}:{c}" for t, c in component_types.items()])
+                detail_point = fitz.Point(rect.x0, rect.y0 + 10)
+                page.insert_text(detail_point, f"[{type_summary}]", fontsize=6, color=color)
             
             # 绘制标签文本
             page.insert_text(label_point, label_text, fontsize=8, color=color)
@@ -1237,7 +1250,7 @@ class PDFBboxExtractor:
             self._thread_safe_print(f"🧵 线程 {thread_id}: 开始处理第 {page_num + 1} 页...")
             
             all_elements = []
-            page_stats = {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0}
+            page_stats = {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0, 'vector_graphics': 0}
             
             # 1. 优先提取表格（如果启用）
             tables = []
@@ -1331,8 +1344,61 @@ class PDFBboxExtractor:
                 self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页找到 {len(original_lines)} 个原始框线")
                 page_stats['original_lines'] = len(original_lines)
             
-            # 合并所有元素（按优先级：表格 -> 图像 -> 文本块 -> 原始框线）
+            # 6. 矢量图检测和合并（在合并所有元素之前进行）
+            # 创建候选元素列表（排除表格，因为它们有特殊的处理逻辑）
+            candidate_elements = []
+            candidate_elements.extend(images)
+            candidate_elements.extend(filtered_text_blocks)
+            candidate_elements.extend(original_lines)
+            
+            # 检测并合并矢量图
+            vector_graphics = []
+            if candidate_elements:
+                self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页开始矢量图检测 (候选元素: {len(candidate_elements)})")
+                processed_elements = self._detect_and_merge_vector_graphics(candidate_elements)
+                
+                # 分离矢量图和其他元素
+                remaining_elements = []
+                for element in processed_elements:
+                    if element['type'] == 'vector_graphic':
+                        vector_graphics.append(element)
+                    else:
+                        remaining_elements.append(element)
+                
+                # 更新各类元素列表
+                if vector_graphics:
+                    # 更新其他元素列表（移除被合并的元素）
+                    remaining_images = [e for e in remaining_elements if e['type'] == 'image']
+                    remaining_text_blocks = [e for e in remaining_elements if e['type'] == 'text']
+                    remaining_original_lines = [e for e in remaining_elements if e['type'] == 'original_line']
+                    
+                    # 重新分配索引
+                    for i, img in enumerate(remaining_images):
+                        img['index'] = i
+                    for i, vg in enumerate(vector_graphics):
+                        vg['index'] = i
+                    
+                    # 更新统计信息
+                    page_stats['images'] = len(remaining_images)
+                    page_stats['text_blocks'] = len(remaining_text_blocks)
+                    page_stats['original_lines'] = len(remaining_original_lines)
+                    page_stats['vector_graphics'] = len(vector_graphics)
+                    
+                    self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页矢量图检测完成: 创建了 {len(vector_graphics)} 个矢量图")
+                    
+                    # 更新全局变量以便后续使用
+                    images = remaining_images
+                    filtered_text_blocks = remaining_text_blocks
+                    original_lines = remaining_original_lines
+                else:
+                    page_stats['vector_graphics'] = 0
+            else:
+                page_stats['vector_graphics'] = 0
+                self._thread_safe_print(f"🧵 线程 {thread_id}: 第 {page_num + 1} 页跳过矢量图检测（无候选元素）")
+            
+            # 合并所有元素（按优先级：表格 -> 矢量图 -> 图像 -> 文本块 -> 原始框线）
             all_elements.extend(tables)
+            all_elements.extend(vector_graphics)
             all_elements.extend(images)
             all_elements.extend(filtered_text_blocks)
             all_elements.extend(original_lines)
@@ -1357,7 +1423,7 @@ class PDFBboxExtractor:
             return {
                 'page_num': page_num,
                 'elements': [],
-                'stats': {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0},
+                'stats': {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0, 'vector_graphics': 0},
                 'status': 'error',
                 'error': error_msg,
                 'thread_id': thread_id
@@ -1395,6 +1461,7 @@ class PDFBboxExtractor:
                 'refined_tables': 0,
                 'original_lines': 0,
                 'original_qwen_tables': 0,
+                'vector_graphics': 0,
                 'pages': total_pages
             }
             
@@ -1481,6 +1548,7 @@ class PDFBboxExtractor:
                             total_elements['tables'] += result['stats']['tables']
                             total_elements['refined_tables'] += result['stats']['refined_tables']
                             total_elements['original_lines'] += result['stats'].get('original_lines', 0)
+                            total_elements['vector_graphics'] += result['stats'].get('vector_graphics', 0)
                             total_elements['original_qwen_tables'] += len([e for e in result['elements'] if e.get('type') == 'original_qwen_table'])
                         else:
                             failed_pages.append((page_num, result.get('error', '未知错误')))
@@ -1488,7 +1556,7 @@ class PDFBboxExtractor:
                             page_results[page_num] = {
                                 'page_num': page_num,
                                 'elements': [],
-                                'stats': {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0},
+                                'stats': {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0, 'vector_graphics': 0},
                                 'status': 'error'
                             }
                         
@@ -1503,7 +1571,7 @@ class PDFBboxExtractor:
                         page_results[page_num] = {
                             'page_num': page_num,
                             'elements': [],
-                            'stats': {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0},
+                            'stats': {'text_blocks': 0, 'images': 0, 'tables': 0, 'refined_tables': 0, 'original_lines': 0, 'vector_graphics': 0},
                             'status': 'error'
                         }
             
@@ -1565,6 +1633,8 @@ class PDFBboxExtractor:
             print(f"  - 图像: {total_elements['images']} (已去重)")
             refined_info = f" (其中{total_elements['refined_tables']}个边框已修正)" if total_elements['refined_tables'] > 0 else ""
             print(f"  - 表格: {total_elements['tables']}{refined_info}")
+            if total_elements['vector_graphics'] > 0:
+                print(f"  - 矢量图: {total_elements['vector_graphics']} (洋红色)")
             if total_elements['original_lines'] > 0:
                 print(f"  - 原始框线: {total_elements['original_lines']} (橙色)")
             if total_elements['original_qwen_tables'] > 0:
@@ -1585,10 +1655,12 @@ class PDFBboxExtractor:
                 print(f"🟠 原始框线标注已启用，显示{total_elements['original_lines']}条PDF原始框线")
             if total_elements['original_qwen_tables'] > 0:
                 print(f"🟣 原始Qwen表格标注已启用，显示{total_elements['original_qwen_tables']}个修正前的表格框线")
+            if total_elements['vector_graphics'] > 0:
+                print(f"🟦 矢量图检测已启用，{total_elements['vector_graphics']}个密集区域被识别为矢量图（30×30px区域内同时包含线条和图像）")
             
             return {
                 'status': 'success',
-                'message': f'成功并行处理 {total_elements["pages"]} 页，共提取 {sum([total_elements[key] for key in ["text_blocks", "images", "tables"]])} 个元素',
+                'message': f'成功并行处理 {total_elements["pages"]} 页，共提取 {sum([total_elements[key] for key in ["text_blocks", "images", "tables", "vector_graphics"]])} 个元素',
                 'statistics': total_elements,
                 'input_path': input_path,
                 'output_path': output_path,
@@ -1646,7 +1718,8 @@ class PDFBboxExtractor:
                     "total_tables": 0,
                     "refined_tables": 0,
                     "total_original_lines": 0,
-                    "total_original_qwen_tables": 0
+                    "total_original_qwen_tables": 0,
+                    "total_vector_graphics": 0
                 },
                 "pages": {}
             }
@@ -1672,6 +1745,10 @@ class PDFBboxExtractor:
                         element_data['label'] = element.get('label', '表格')
                         element_data['confidence'] = element.get('confidence', 1.0)
                         element_data['refined'] = element.get('refined', False)  # 是否被框线修正
+                    elif element['type'] == 'vector_graphic':
+                        element_data['component_types'] = element.get('component_types', {})
+                        element_data['component_count'] = element.get('component_count', 0)
+                        element_data['component_details'] = element.get('component_details', [])
                     
                     page_data['elements'].append(element_data)
                     
@@ -1684,6 +1761,8 @@ class PDFBboxExtractor:
                         metadata["summary"]["total_tables"] += 1
                         if element.get('refined', False):
                             metadata["summary"]["refined_tables"] += 1
+                    elif element['type'] == 'vector_graphic':
+                        metadata["summary"]["total_vector_graphics"] += 1
                     elif element['type'] == 'original_line':
                         metadata["summary"]["total_original_lines"] += 1
                     elif element['type'] == 'original_qwen_table':
@@ -1805,6 +1884,252 @@ class PDFBboxExtractor:
                 img.close()
             except:
                 pass
+    
+    def _detect_dense_area_elements(self, elements: List[Dict[str, Any]], area_size: float = 30.0) -> List[List[int]]:
+        """
+        检测密集区域内的元素（30x30像素区域）
+        
+        Args:
+            elements: 所有元素列表
+            area_size: 密集区域大小（像素），默认30像素
+            
+        Returns:
+            密集区域元素索引的列表，每个子列表包含一个密集区域的元素索引
+        """
+        if len(elements) < 2:
+            return []
+        
+        dense_groups = []
+        
+        # 为每个元素创建密集区域检测
+        for i, element in enumerate(elements):
+            bbox = element['bbox']
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            
+            # 定义密集区域边界
+            area_left = center_x - area_size / 2
+            area_right = center_x + area_size / 2
+            area_top = center_y - area_size / 2
+            area_bottom = center_y + area_size / 2
+            
+            # 查找在此密集区域内的所有元素
+            area_elements = []
+            for j, other_element in enumerate(elements):
+                if i == j:
+                    continue
+                    
+                other_bbox = other_element['bbox']
+                other_center_x = (other_bbox[0] + other_bbox[2]) / 2
+                other_center_y = (other_bbox[1] + other_bbox[3]) / 2
+                
+                # 检查元素中心是否在密集区域内，或者元素与密集区域有重叠
+                if (area_left <= other_center_x <= area_right and area_top <= other_center_y <= area_bottom) or \
+                   self._boxes_overlap([area_left, area_top, area_right, area_bottom], other_bbox, 0.1):
+                    area_elements.append(j)
+            
+            # 如果找到密集元素，添加当前元素索引
+            if area_elements:
+                area_elements.append(i)
+                area_elements.sort()
+                
+                # 检查是否已存在相似的组
+                is_duplicate_group = False
+                for existing_group in dense_groups:
+                    if len(set(area_elements) & set(existing_group)) > len(area_elements) * 0.5:
+                        # 合并到现有组
+                        existing_group.extend(area_elements)
+                        existing_group = list(set(existing_group))  # 去重
+                        existing_group.sort()
+                        is_duplicate_group = True
+                        break
+                
+                if not is_duplicate_group:
+                    dense_groups.append(area_elements)
+        
+        # 去重和合并重叠的组
+        merged_groups = []
+        for group in dense_groups:
+            merged = False
+            for existing_group in merged_groups:
+                if len(set(group) & set(existing_group)) > 0:
+                    # 合并组
+                    existing_group.extend(group)
+                    existing_group[:] = sorted(list(set(existing_group)))
+                    merged = True
+                    break
+            if not merged:
+                merged_groups.append(sorted(list(set(group))))
+        
+        # 过滤掉少于2个元素的组
+        return [group for group in merged_groups if len(group) >= 2]
+    
+    def _validate_vector_graphic_group(self, elements: List[Dict[str, Any]], group_indices: List[int]) -> bool:
+        """
+        验证元素组是否符合矢量图的要求（至少包含line和图片）
+        
+        Args:
+            elements: 所有元素列表
+            group_indices: 组内元素索引列表
+            
+        Returns:
+            是否符合矢量图要求
+        """
+        has_line = False
+        has_image = False
+        
+        for idx in group_indices:
+            element = elements[idx]
+            element_type = element['type']
+            
+            if element_type == 'original_line':
+                has_line = True
+            elif element_type == 'image':
+                has_image = True
+            
+            # 如果已经同时包含line和图片，可以提前返回
+            if has_line and has_image:
+                return True
+        
+        return has_line and has_image
+    
+    def _merge_elements_to_vector_graphic(self, elements: List[Dict[str, Any]], group_indices: List[int], vector_index: int) -> Dict[str, Any]:
+        """
+        将元素组合并为矢量图
+        
+        Args:
+            elements: 所有元素列表
+            group_indices: 要合并的元素索引列表
+            vector_index: 矢量图索引
+            
+        Returns:
+            合并后的矢量图元素
+        """
+        # 计算包围框
+        all_bboxes = [elements[idx]['bbox'] for idx in group_indices]
+        min_x = min(bbox[0] for bbox in all_bboxes)
+        min_y = min(bbox[1] for bbox in all_bboxes)
+        max_x = max(bbox[2] for bbox in all_bboxes)
+        max_y = max(bbox[3] for bbox in all_bboxes)
+        
+        merged_bbox = [min_x, min_y, max_x, max_y]
+        
+        # 统计组成元素
+        component_types = {}
+        component_details = []
+        
+        for idx in group_indices:
+            element = elements[idx]
+            element_type = element['type']
+            
+            if element_type not in component_types:
+                component_types[element_type] = 0
+            component_types[element_type] += 1
+            
+            # 保存组件详情
+            component_details.append({
+                'type': element_type,
+                'bbox': element['bbox'],
+                'index': element.get('index', 0)
+            })
+        
+        # 创建矢量图元素
+        vector_graphic = {
+            'type': 'vector_graphic',
+            'bbox': merged_bbox,
+            'rect': fitz.Rect(merged_bbox),
+            'index': vector_index,
+            'component_types': component_types,
+            'component_details': component_details,
+            'component_count': len(group_indices)
+        }
+        
+        return vector_graphic
+    
+    def _detect_and_merge_vector_graphics(self, elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        检测并合并矢量图（递归处理直到无法再合并）
+        
+        Args:
+            elements: 所有元素列表
+            
+        Returns:
+            处理后的元素列表（移除被合并的元素，添加矢量图元素）
+        """
+        original_count = len(elements)
+        iteration = 0
+        max_iterations = 10  # 防止无限循环
+        
+        while iteration < max_iterations:
+            iteration += 1
+            self._thread_safe_print(f"    矢量图检测第 {iteration} 次迭代...")
+            
+            # 检测密集区域
+            dense_groups = self._detect_dense_area_elements(elements)
+            
+            if not dense_groups:
+                self._thread_safe_print(f"    第 {iteration} 次迭代未发现密集区域，结束检测")
+                break
+            
+            self._thread_safe_print(f"    第 {iteration} 次迭代发现 {len(dense_groups)} 个密集区域")
+            
+            # 验证并合并符合条件的组
+            valid_groups = []
+            for group_indices in dense_groups:
+                if self._validate_vector_graphic_group(elements, group_indices):
+                    valid_groups.append(group_indices)
+                    
+                    # 显示组内元素类型统计
+                    type_counts = {}
+                    for idx in group_indices:
+                        element_type = elements[idx]['type']
+                        type_counts[element_type] = type_counts.get(element_type, 0) + 1
+                    
+                    type_summary = ', '.join([f"{t}:{c}" for t, c in type_counts.items()])
+                    self._thread_safe_print(f"      有效矢量图组: {len(group_indices)}个元素 ({type_summary})")
+            
+            if not valid_groups:
+                self._thread_safe_print(f"    第 {iteration} 次迭代未发现有效矢量图组（需要同时包含line和image），结束检测")
+                break
+            
+            # 创建新的元素列表
+            new_elements = []
+            used_indices = set()
+            vector_index = 0
+            
+            # 添加矢量图
+            for group_indices in valid_groups:
+                vector_graphic = self._merge_elements_to_vector_graphic(elements, group_indices, vector_index)
+                new_elements.append(vector_graphic)
+                used_indices.update(group_indices)
+                vector_index += 1
+            
+            # 添加未被合并的元素
+            for i, element in enumerate(elements):
+                if i not in used_indices:
+                    new_elements.append(element)
+            
+            merged_count = len(used_indices)
+            vector_count = len(valid_groups)
+            
+            self._thread_safe_print(f"    第 {iteration} 次迭代完成: 合并了 {merged_count} 个元素为 {vector_count} 个矢量图")
+            
+            # 更新元素列表
+            elements = new_elements
+            
+            # 如果没有合并任何元素，结束迭代
+            if merged_count == 0:
+                break
+        
+        final_count = len(elements)
+        total_vector_graphics = sum(1 for e in elements if e['type'] == 'vector_graphic')
+        
+        if total_vector_graphics > 0:
+            self._thread_safe_print(f"  矢量图检测完成: {original_count} → {final_count} 个元素 (创建了 {total_vector_graphics} 个矢量图)")
+        else:
+            self._thread_safe_print(f"  矢量图检测完成: 未发现符合条件的矢量图")
+        
+        return elements
 
 
 def extract_pdf_bboxes(input_pdf_path: str, output_dir: str = "tmp", enable_table_detection: bool = True, 
