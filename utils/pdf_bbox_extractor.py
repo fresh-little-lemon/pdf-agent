@@ -257,7 +257,7 @@ class PDFBboxExtractor:
         pred_width = pred_right - pred_left
         
         # 检查是否为小高度表格（需要特殊处理）
-        is_small_height_table = pred_height < 70.0
+        is_small_height_table = pred_height < 50.0
         
         # 存储候选边框线及其距离
         candidates = {
@@ -268,7 +268,7 @@ class PDFBboxExtractor:
         }
         
         if is_small_height_table:
-            self._thread_safe_print(f"    🔍 检测到小高度表格 (高度: {pred_height:.1f}px)，使用优化策略")
+            self._thread_safe_print(f"    🔍 检测到小高度表格 (高度: {pred_height:.1f}px < 50px)，使用优化策略和增强宽容度")
         
         # 遍历所有线条，找出在容忍度范围内的候选线条
         for line in page_lines:
@@ -335,8 +335,16 @@ class PDFBboxExtractor:
                         # 计算与上边框的距离（只考虑位置合理的线条）
                         top_distance = abs(y_pos - pred_top)
                         if top_distance <= tolerance:
-                            # 上边框候选：线条应该在预测上边界的上方或略微下方（不超过表格高度的1/4）
-                            max_down_offset = pred_height * 0.25  # 允许向下偏移表格高度的1/4
+                            # 上边框候选：线条应该在预测上边界的上方或略微下方
+                            # 对于小高度表格（<50px），使用更大的宽容度
+                            if pred_height < 50.0:
+                                # 小高度表格：允许向下偏移更大的距离（表格高度的50%或最小30px）
+                                max_down_offset = max(pred_height * 0.85, 30.0)
+                                self._thread_safe_print(f"      🔍 小高度表格上边框搜索: 使用增强宽容度 {max_down_offset:.1f}px")
+                            else:
+                                # 标准表格：允许向下偏移表格高度的1/4
+                                max_down_offset = pred_height * 0.25
+                            
                             if y_pos <= pred_top + max_down_offset:
                                 candidates['top'].append((y_pos, top_distance, x_range))
                                 self._thread_safe_print(f"      ✅ 上边框候选: y={y_pos:.1f}, 距离={top_distance:.1f}, 重叠度={overlap_width:.1f}/{min_overlap_required:.1f}, 线条范围=[{x_range[0]:.1f}, {x_range[1]:.1f}]")
@@ -346,8 +354,16 @@ class PDFBboxExtractor:
                         # 计算与下边框的距离（只考虑位置合理的线条）
                         bottom_distance = abs(y_pos - pred_bottom)
                         if bottom_distance <= tolerance:
-                            # 下边框候选：线条应该在预测下边界的下方或略微上方（不超过表格高度的1/4）
-                            max_up_offset = pred_height * 0.25  # 允许向上偏移表格高度的1/4
+                            # 下边框候选：线条应该在预测下边界的下方或略微上方
+                            # 对于小高度表格（<50px），使用更大的宽容度
+                            if pred_height < 50.0:
+                                # 小高度表格：允许向上偏移更大的距离（表格高度的50%或最小30px）
+                                max_up_offset = max(pred_height * 0.5, 30.0)
+                                self._thread_safe_print(f"      🔍 小高度表格下边框搜索: 使用增强宽容度 {max_up_offset:.1f}px")
+                            else:
+                                # 标准表格：允许向上偏移表格高度的1/4
+                                max_up_offset = pred_height * 0.25
+                            
                             if y_pos >= pred_bottom - max_up_offset:
                                 candidates['bottom'].append((y_pos, bottom_distance, x_range))
                             else:
@@ -420,8 +436,9 @@ class PDFBboxExtractor:
                                 # 计算与目标下边框的距离（加入位置合理性检查）
                                 bottom_distance = abs(y_pos - target_bottom)
                                 if bottom_distance <= small_tolerance:
-                                    # 对于小高度表格的下边框搜索，允许更大的偏移范围
-                                    max_up_offset = pred_height * 0.5  # 允许向上偏移原始高度的一半
+                                    # 对于小高度表格的下边框搜索，使用增强宽容度
+                                    max_up_offset = max(pred_height * 0.5, 30.0)  # 允许向上偏移更大的距离（原始高度的50%或最小30px）
+                                    self._thread_safe_print(f"      🔍 小高度表格下边框重新搜索: 使用增强宽容度 {max_up_offset:.1f}px")
                                     if y_pos >= target_bottom - max_up_offset:
                                         adjusted_bottom_candidates.append((y_pos, bottom_distance, x_range))
                                     else:
