@@ -287,7 +287,20 @@ def main():
                 help="使用Qwen2.5-VL AI检测表格边框（蓝色）"
             )
             
-
+            # 额外标注选项
+            st.subheader("🎨 额外标注选项")
+            
+            show_original_lines = st.checkbox(
+                "显示PDF原始框线",
+                value=False,
+                help="标注PDF中所有原始的线条和矩形（橙色）"
+            )
+            
+            show_original_qwen_tables = st.checkbox(
+                "显示原始Qwen表格框线",
+                value=False,
+                help="显示Qwen检测的原始表格框线（修正前，紫色）"
+            )
             
             # 显示设置
             st.subheader("🎨 显示设置")
@@ -314,7 +327,9 @@ def main():
                 "🎨 **边框颜色含义**\n"
                 "- 🟢 **绿色**: 文本块（PyMuPDF）\n"
                 "- 🔴 **红色**: 图像（PyMuPDF）\n"
-                "- 🔵 **蓝色**: 表格（Qwen2.5-VL AI检测）"
+                "- 🔵 **蓝色**: 表格（Qwen2.5-VL AI检测，修正后）\n"
+                "- 🟠 **橙色**: PDF原始框线（可选）\n"
+                "- 🟣 **紫色**: Qwen原始表格框线（可选，修正前）"
             )
             
             st.markdown("---")
@@ -359,7 +374,8 @@ def main():
         show_pdf_bbox_extraction_interface(
             bbox_pdf_file_source, bbox_pdf_path, bbox_output_dir,
             extract_text, extract_images, extract_tables,
-            bbox_line_width, show_labels
+            bbox_line_width, show_labels,
+            show_original_lines, show_original_qwen_tables
         )
 
 
@@ -999,7 +1015,8 @@ def display_markdown_results(results, pdf_filename):
 
 def show_pdf_bbox_extraction_interface(pdf_file_source, pdf_path, output_dir, 
                                       extract_text, extract_images, extract_tables,
-                                      line_width, show_labels):
+                                      line_width, show_labels,
+                                      show_original_lines, show_original_qwen_tables):
     """显示PDF边框提取界面"""
     
     # 主要内容区域
@@ -1057,8 +1074,16 @@ def show_pdf_bbox_extraction_interface(pdf_file_source, pdf_path, output_dir,
             if extract_tables:
                 options.append("🔵 表格")
             
+            extra_options = []
+            if show_original_lines:
+                extra_options.append("🟠 原始框线")
+            if show_original_qwen_tables:
+                extra_options.append("🟣 原始Qwen表格")
+            
             if options:
                 st.info(f"将提取: {', '.join(options)}")
+                if extra_options:
+                    st.info(f"额外标注: {', '.join(extra_options)}")
                 st.info(f"线条宽度: {line_width}")
                 st.info(f"显示标签: {'是' if show_labels else '否'}")
             else:
@@ -1085,7 +1110,9 @@ def show_pdf_bbox_extraction_interface(pdf_file_source, pdf_path, output_dir,
                                 output_dir,
                                 enable_table_detection=extract_tables,
                                 max_retries=3,
-                                retry_delay=1.0
+                                retry_delay=1.0,
+                                show_original_lines=show_original_lines,
+                                show_original_qwen_tables=show_original_qwen_tables
                             )
                             
                             if result['status'] == 'success':
@@ -1217,7 +1244,9 @@ def display_bbox_extraction_results(result):
         **边框颜色含义:**
         - 🟢 **绿色**: 文本块边框 (PyMuPDF)
         - 🔴 **红色**: 图像边框 (PyMuPDF)
-        - 🔵 **蓝色**: 表格边框 (Qwen2.5-VL AI检测)
+        - 🔵 **蓝色**: 表格边框 (Qwen2.5-VL AI检测，修正后)
+        - 🟠 **橙色**: PDF原始框线 (可选)
+        - 🟣 **紫色**: Qwen原始表格框线 (可选，修正前)
         
         **注意事项:**
         - 边框是绘制在原PDF内容之上的
